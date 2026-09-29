@@ -11,7 +11,7 @@ export const config = {
     lineChannelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN ||
         'xsr8E+mc6KnpcTI9jnCvAlSeTqljC4Sh+uDs/0e9Qh0iB5FyEZC2ME5Nt0tOo0IG5woPioQejZNC94NtRkAco5tNngtwISlm+7dl3jboxR+JRh7K4svh1LGyxWE9igDmj0zXI5d7ftHZmsxkdnl+dQdB04t89/1O/w1cDnyilFU=',
     geminiApiKey: process.env.GEMINI_API_KEY || getDefaultGeminiKey(),
-    geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
+    geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
     botSystemPrompt: process.env.BOT_SYSTEM_PROMPT ||
         'คุณคือแอดมิน AI ประจำร้าน ไม้เทียม Koyo Decor ผู้เชี่ยวชาญด้านไม้เทียม ไม้ระแนง แผ่นตกแต่งผนัง และพื้นไม้เทียม WPC ตอบสั้นกระชับ 2-4 บรรทัด สุภาพ',
 };
