@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from './config.js';
 import { KOYO_STORE_KNOWLEDGE } from './knowledge.js';
+import { ChatMessage } from './sessionManager.js';
 
 let aiInstance: GoogleGenAI | null = null;
 
@@ -35,15 +36,18 @@ ${KOYO_STORE_KNOWLEDGE}
 1. ตอบให้ 'สั้น กระชับ ตรงประเด็น' 2-4 บรรทัดเท่านั้น เหมือนแอดมินคนจริงพิมพ์ใน LINE
 2. ห้ามทักทายเกริ่นนำยาวยืด (ห้ามพูดคำว่า 'ยินดีต้อนรับสู่...' ซ้ำซาก) ให้เข้าเรื่องทันที
 3. สามารถดึงข้อมูลสินค้า ราคา รุ่น หรือคุณสมบัติจากฐานข้อมูลด้านบนมาตอบได้ถูกต้องแม่นยำ
-4. หากลูกค้าถามสถานที่ เบอร์โทร หรือเวลาทำการ ให้บอกข้อมูลของร้านที่ชลบุรีและเบอร์โทรได้ทันที
+4. หากลูกค้าถามสถานที่ เบอร์โทร หรือเวลาทำการ ให้บอกข้อมูลของร้านที่ ต.นาป่า ชลบุรี และเบอร์โทรได้ทันที
 5. หากลูกค้าแจ้งขนาดพื้นที่ ให้คำนวณ ตร.ม. สั้นๆ แล้วแนะนำสินค้าที่เหมาะกับงานภายนอก/ภายใน พร้อมชวนส่งรูปหน้างาน
 6. สุภาพ ไพเราะ เป็นกันเอง ลงท้ายด้วยครับ/ค่ะ`;
 }
 
 /**
- * ส่งข้อความไปยัง Google Gemini API พร้อม System Instruction และ Knowledge Base
+ * ส่งข้อความไปยัง Google Gemini API พร้อม System Instruction, ประวัติการคุยต่อเนื่อง และ Knowledge Base
  */
-export async function askGemini(userMessage: string): Promise<string> {
+export async function askGemini(
+  userMessage: string,
+  history: ChatMessage[] = []
+): Promise<string> {
   if (!config.geminiApiKey || config.geminiApiKey.includes('your_gemini_api_key')) {
     return 'ขออภัยครับ ยังไม่ได้ตั้งค่า GEMINI_API_KEY ในไฟล์ .env';
   }
@@ -52,13 +56,26 @@ export async function askGemini(userMessage: string): Promise<string> {
   const modelsToTry = [config.geminiModel, ...FALLBACK_MODELS.filter((m) => m !== config.geminiModel)];
   const systemInstruction = buildSystemInstruction();
 
+  // สร้าง Context บทสนทนาย้อนหลังเพื่อให้ AI ตอบได้ต่อเนื่อง
+  const contents: any[] = [];
+  for (const h of history) {
+    contents.push({
+      role: h.role === 'model' ? 'model' : 'user',
+      parts: [{ text: h.parts }],
+    });
+  }
+  contents.push({
+    role: 'user',
+    parts: [{ text: userMessage }],
+  });
+
   let lastError: any = null;
 
   for (const model of modelsToTry) {
     try {
       const response = await ai.models.generateContent({
         model: model,
-        contents: userMessage,
+        contents: contents,
         config: {
           systemInstruction: systemInstruction,
           maxOutputTokens: 300,

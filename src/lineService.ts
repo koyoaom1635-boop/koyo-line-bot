@@ -1,6 +1,14 @@
 import { messagingApi, webhook } from '@line/bot-sdk';
 import { config } from './config.js';
 import { askGemini } from './geminiService.js';
+import {
+  isUserPaused,
+  pauseUser,
+  unpauseUser,
+  getChatHistory,
+  appendChatHistory,
+  bufferMessage,
+} from './sessionManager.js';
 
 const { MessagingApiClient } = messagingApi;
 
@@ -15,11 +23,54 @@ function getLineClient(): messagingApi.MessagingApiClient {
   return clientInstance;
 }
 
+// คำสำคัญที่ลูกค้าใช้เพื่อขอคุยกับคนจริง
+const HUMAN_REQUEST_KEYWORDS = [
+  'ขอคุยกับคน',
+  'คุยกับคน',
+  'ติดต่อคน',
+  'ติดต่อแอดมิน',
+  'คุยกับแอดมิน',
+  'ขอคุยแอดมิน',
+  'แอดมินอยู่ไหม',
+  'ติดต่อเจ้าหน้าที่',
+  'ขอสายแอดมิน',
+  'คุยกับเจ้าหน้าที่',
+  'มีคนอยู่ไหม',
+];
+
+/**
+ * ส่งข้อความตอบกลับไปยัง LINE โดยลอง replyMessage ก่อน หากไม่สำเร็จจะ fallback ไป pushMessage
+ */
+async function sendLineReply(
+  userId: string,
+  replyToken: string,
+  text: string
+): Promise<void> {
+  const client = getLineClient();
+  try {
+    await client.replyMessage({
+      replyToken: replyToken,
+      messages: [{ type: 'text', text: text }],
+    });
+  } catch (replyError: any) {
+    console.warn('⚠️ replyMessage ไม่สำเร็จ กำลังส่งผ่าน pushMessage แทน...');
+    try {
+      await client.pushMessage({
+        to: userId,
+        messages: [{ type: 'text', text: text }],
+      });
+    } catch (pushError: any) {
+      console.error('❌ pushMessage เกิดข้อผิดพลาด:', pushError?.message || pushError);
+    }
+  }
+}
+
 /**
  * ฟังก์ชันจัดการ Webhook Event ที่ได้รับจาก LINE Platform
  */
 export async function handleLineEvent(event: webhook.Event): Promise<void> {
   const client = getLineClient();
+  const userId = event.source?.userId || 'unknown_user';
 
   // กรณีผู้ใช้เพิ่มเพื่อน (Follow Event)
   if (event.type === 'follow') {
@@ -29,7 +80,7 @@ export async function handleLineEvent(event: webhook.Event): Promise<void> {
         messages: [
           {
             type: 'text',
-            text: 'สวัสดีครับ! ยินดีต้อนรับครับ 🙏✨\nผมคือ AI Assistant พร้อมตอบคำถามและให้ข้อมูล สามารถพิมพ์สิ่งที่ต้องการสอบถามมาได้เลยครับ!',
+            text: 'สวัสดีครับ! ยินดีต้อนรับสู่ ร้านไม้เทียม Koyo Decor ครับ 🙏✨\nสนใจสอบถามข้อมูลไม้เทียม WPC, ไม้ ASA หรือแผ่นผนังรุ่นไหน พิมพ์บอกขนาดพื้นที่หรือสิ่งที่ต้องการได้เลยครับ!',
           },
         ],
       });
@@ -49,42 +100,91 @@ export async function handleLineEvent(event: webhook.Event): Promise<void> {
     return;
   }
 
-  // กรณีเป็นข้อความตัวอักษร (Text Message)
-  if (message.type === 'text') {
-    const userText = message.text.trim();
-    console.log(`📩 ได้รับข้อความ: "${userText}"`);
+  // กรณีไม่ใช่ข้อความตัวอักษร
+  if (message.type !== 'text') {
+    // ถ้าบอทถูกสั่งพักอยู่ ไม่ต้องตอบแทรก
+    if (isUserPaused(userId)) return;
 
-    // ส่งข้อความไปประมวลผลด้วย Gemini AI
-    const aiResponse = await askGemini(userText);
-    console.log(`🤖 AI ตอบกลับ: "${aiResponse.slice(0, 60)}..."`);
-
-    await client.replyMessage({
-      replyToken: replyToken,
-      messages: [
-        {
-          type: 'text',
-          text: aiResponse,
-        },
-      ],
-    });
+    let nonTextReply = 'ขอบคุณสำหรับข้อความครับ หากต้องการสอบถามข้อมูลสินค้า สามารถพิมพ์เป็นข้อความสอบถามได้เลยนะครับ 😊';
+    if (message.type === 'image') {
+      nonTextReply = 'ได้รับรูปภาพเรียบร้อยแล้วครับ หากมีขนาดพื้นที่หรือต้องการให้ช่วยประเมินราคา สามารถพิมพ์ระบุเพิ่มเติมได้เลยครับ 📷';
+    }
+    await sendLineReply(userId, replyToken, nonTextReply);
     return;
   }
 
-  // กรณีส่งเป็นสติกเกอร์ หรือ รูปภาพ
-  let replyText = 'ขอบคุณสำหรับข้อความครับ หากต้องการสอบถามข้อมูล สามารถพิมพ์เป็นข้อความสอบถามได้เลยนะครับ 😊';
-  if (message.type === 'sticker') {
-    replyText = 'ขอบคุณสำหรับสติกเกอร์น่ารักๆ ครับ มีข้อความหรือคำถามอะไรให้ช่วยตอบ พิมพ์ถามได้เลยนะครับ! ✨';
-  } else if (message.type === 'image') {
-    replyText = 'ได้รับรูปภาพเรียบร้อยแล้วครับ หากมีคำถามเกี่ยวกับรูปภาพหรือบริการ สามารถพิมพ์แจ้งรายละเอียดได้เลยครับ 📷';
+  const rawText = message.text.trim();
+  const lowerText = rawText.toLowerCase();
+
+  // ==========================================
+  // 1. คำสั่งสำหรับแอดมิน: สั่งพัก / สั่งเริ่มบอท
+  // ==========================================
+  if (lowerText === '#พัก' || lowerText === '#pause' || lowerText === '#หยุด' || lowerText === '#stop') {
+    pauseUser(userId, 60 * 60 * 1000); // พัก 1 ชั่วโมง
+    console.log(`🛑 แอดมินสั่งพักบอทสำหรับ User: ${userId}`);
+    await sendLineReply(
+      userId,
+      replyToken,
+      '🛑 พักการทำงานของ AI สำหรับห้องแชทนี้ชั่วคราว 1 ชั่วโมงครับ แอดมินสามารถคุยกับลูกค้าได้เลยครับ (หากต้องการเปิดบอทใหม่ให้พิมพ์ #เริ่ม)'
+    );
+    return;
   }
 
-  await client.replyMessage({
-    replyToken: replyToken,
-    messages: [
-      {
-        type: 'text',
-        text: replyText,
-      },
-    ],
+  if (lowerText === '#เริ่ม' || lowerText === '#start' || lowerText === '#resume' || lowerText === '#on') {
+    unpauseUser(userId);
+    console.log(`▶️ แอดมินสั่งเปิดบอทสำหรับ User: ${userId}`);
+    await sendLineReply(
+      userId,
+      replyToken,
+      '▶️ บอท AI กลับมาทำงานและพร้อมตอบลูกค้าตามปกติแล้วครับ'
+    );
+    return;
+  }
+
+  // ==========================================
+  // 2. ถ้าห้องแชทนี้ "กำลังพักบอทอยู่" -> เงียบ ไม่ตอบแทรก
+  // ==========================================
+  if (isUserPaused(userId)) {
+    console.log(`🤫 ห้องแชท ${userId} อยู่ในโหมดพักบอท -> AI ไม่ตอบแทรก`);
+    return;
+  }
+
+  // ==========================================
+  // 3. ตรวจจับคำขอคุยกับคนจริง (Auto Pause on Human Request)
+  // ==========================================
+  const isRequestingHuman = HUMAN_REQUEST_KEYWORDS.some((kw) => rawText.includes(kw));
+  if (isRequestingHuman) {
+    pauseUser(userId, 60 * 60 * 1000); // พัก 1 ชั่วโมง
+    console.log(`🙋 ลูกค้าขอคุยกับคนจริง -> พักบอทอัตโนมัติสำหรับ User: ${userId}`);
+    await sendLineReply(
+      userId,
+      replyToken,
+      'รับทราบครับผม ขออนุญาตประสานงานให้แอดมินเข้ามาดูแลสักครู่นะครับ 🙏 เจ้าหน้าที่จะรีบตอบกลับให้เร็วที่สุดครับ'
+    );
+    return;
+  }
+
+  // ==========================================
+  // 4. บัฟเฟอร์ข้อความ (Debounce 3.5s) เพื่อรวมข้อความที่พิมพ์รัวๆ
+  // ==========================================
+  console.log(`📩 ได้รับข้อความจาก [${userId.slice(-6)}]: "${rawText}" (เข้าคิวบัฟเฟอร์)`);
+
+  bufferMessage(userId, rawText, replyToken, async (combinedText, latestToken) => {
+    try {
+      console.log(`🚀 กำลังประมวลผลข้อความรวม: "${combinedText}"`);
+      const history = getChatHistory(userId);
+      const aiResponse = await askGemini(combinedText, history);
+
+      console.log(`🤖 AI ตอบกลับ: "${aiResponse.slice(0, 70)}..."`);
+
+      // บันทึกประวัติการคุย
+      appendChatHistory(userId, 'user', combinedText);
+      appendChatHistory(userId, 'model', aiResponse);
+
+      // ส่งคำตอบกลับไปยัง LINE
+      await sendLineReply(userId, latestToken, aiResponse);
+    } catch (err: any) {
+      console.error('❌ ข้อผิดพลาดในการตอบกลับ:', err?.message || err);
+    }
   });
 }
