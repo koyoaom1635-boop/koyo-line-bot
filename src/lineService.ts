@@ -2,6 +2,7 @@ import { messagingApi, webhook } from '@line/bot-sdk';
 import { config } from './config.js';
 import { askGemini } from './geminiService.js';
 import {
+  isGlobalBotEnabled,
   isUserPaused,
   pauseUser,
   unpauseUser,
@@ -69,6 +70,12 @@ async function sendLineReply(
  * ฟังก์ชันจัดการ Webhook Event ที่ได้รับจาก LINE Platform
  */
 export async function handleLineEvent(event: webhook.Event): Promise<void> {
+  // ถ้าปิดบอททั้งระบบอยู่ ไม่ต้องตอบข้อความใดๆ ทั้งสิ้น (แอดมินตอบเอง)
+  if (!isGlobalBotEnabled()) {
+    console.log('🛑 บอทอยู่ในโหมดพักการทำงานทั้งระบบ -> ไม่ตอบแทรก');
+    return;
+  }
+
   const client = getLineClient();
   const userId = event.source?.userId || 'unknown_user';
 

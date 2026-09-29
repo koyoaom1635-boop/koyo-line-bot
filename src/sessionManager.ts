@@ -20,6 +20,23 @@ const MAX_HISTORY = 8;
 const DEFAULT_PAUSE_DURATION = 60 * 60 * 1000; // 1 ชั่วโมง
 const DEBOUNCE_WAIT_MS = 3500; // รอ 3.5 วินาทีเพื่อรวมข้อความรัวๆ
 
+let isGlobalEnabled = true;
+
+/**
+ * ตรวจสอบว่าระบบบอทเปิดทำงานอยู่หรือไม่ (Master Switch)
+ */
+export function isGlobalBotEnabled(): boolean {
+  return isGlobalEnabled;
+}
+
+/**
+ * สั่งเปิดหรือปิดการทำงานของบอททั้งระบบ
+ */
+export function setGlobalBotEnabled(enabled: boolean): void {
+  isGlobalEnabled = enabled;
+  console.log(`🌐 เปลี่ยนสถานะบอททั้งระบบเป็น: ${enabled ? 'เปิดใช้งาน (ON)' : 'พักการทำงาน (OFF)'}`);
+}
+
 function getOrCreateSession(userId: string): UserSession {
   let session = sessions.get(userId);
   if (!session) {
