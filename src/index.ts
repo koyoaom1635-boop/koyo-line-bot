@@ -74,6 +74,15 @@ app.get('/', (_req: Request, res: Response) => {
     status: 'online',
     message: 'LINE AI Bot (ไม้เทียม Koyo Decor) is running!',
     model: config.geminiModel,
+    diagnostics: {
+      hasSecret: Boolean(config.lineChannelSecret),
+      secretLength: config.lineChannelSecret.length,
+      secretPrefix: config.lineChannelSecret.slice(0, 4),
+      hasSecretFallback: Boolean(config.lineChannelSecretFallback),
+      hasToken: Boolean(config.lineChannelAccessToken),
+      tokenLength: config.lineChannelAccessToken.length,
+      hasGeminiKey: Boolean(config.geminiApiKey),
+    },
     timestamp: new Date().toISOString(),
   });
 });
