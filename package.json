@@ -1,0 +1,27 @@
+{
+  "name": "chat-boot-line",
+  "version": "1.0.0",
+  "description": "LINE AI Chatbot powered by Google Gemini and Node.js",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "keywords": ["line", "line-bot", "gemini", "ai-chatbot", "nodejs", "typescript"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/genai": "^0.1.2",
+    "@line/bot-sdk": "^9.5.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
