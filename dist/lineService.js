@@ -12,19 +12,30 @@ function getLineClient() {
     }
     return clientInstance;
 }
-// คำสำคัญที่ลูกค้าใช้เพื่อขอคุยกับคนจริง
+import { sanitizeText } from './spellChecker.js';
+// คำสำคัญที่ลูกค้าใช้เพื่อขอคุยกับคนจริง (รวมคำที่สะกดผิด พิมพ์ตก หรือภาษาแชท)
 const HUMAN_REQUEST_KEYWORDS = [
     'ขอคุยกับคน',
     'คุยกับคน',
+    'คุยกะคน',
+    'คุยกับคนจิง',
+    'ขอคุยคน',
     'ติดต่อคน',
     'ติดต่อแอดมิน',
     'คุยกับแอดมิน',
+    'คุยกะแอดมิน',
     'ขอคุยแอดมิน',
     'แอดมินอยู่ไหม',
+    'แอดมินอยุ่ไหม',
+    'แอดมินยุไหม',
     'ติดต่อเจ้าหน้าที่',
+    'ติดต่อจนท',
     'ขอสายแอดมิน',
     'คุยกับเจ้าหน้าที่',
     'มีคนอยู่ไหม',
+    'มีคนอยุ่ไหม',
+    'มีคนมั้ย',
+    'มีคนป่าว',
 ];
 /**
  * ฟังก์ชันแยกข้อความตอบกลับของ AI เป็นหลายบับเบิ้ลตามตัวคั่น หรือตามโครงสร้างเนื้อหา
@@ -61,11 +72,12 @@ function splitAiResponse(aiResponse) {
  * ส่งข้อความตอบกลับไปยัง LINE โดยลอง replyMessage ก่อน หากไม่สำเร็จจะ fallback ไป pushMessage
  */
 async function sendLineReply(userId, replyToken, text) {
+    const cleanText = sanitizeText(text);
     const client = getLineClient();
     try {
         await client.replyMessage({
             replyToken: replyToken,
-            messages: [{ type: 'text', text: text }],
+            messages: [{ type: 'text', text: cleanText }],
         });
     }
     catch (replyError) {
@@ -73,7 +85,7 @@ async function sendLineReply(userId, replyToken, text) {
         try {
             await client.pushMessage({
                 to: userId,
-                messages: [{ type: 'text', text: text }],
+                messages: [{ type: 'text', text: cleanText }],
             });
         }
         catch (pushError) {
@@ -87,17 +99,20 @@ async function sendLineReply(userId, replyToken, text) {
 async function sendSequentialLineReply(userId, replyToken, chunks, delayMs = 1200) {
     if (!chunks || chunks.length === 0)
         return;
+    const cleanChunks = chunks.map((c) => sanitizeText(c)).filter((c) => c.length > 0);
+    if (cleanChunks.length === 0)
+        return;
     const client = getLineClient();
     // กรณีมีบับเบิ้ลเดียว ส่งตามปกติทันที
-    if (chunks.length === 1) {
-        await sendLineReply(userId, replyToken, chunks[0]);
+    if (cleanChunks.length === 1) {
+        await sendLineReply(userId, replyToken, cleanChunks[0]);
         return;
     }
     // ส่งบับเบิ้ลแรกผ่าน replyMessage
     try {
         await client.replyMessage({
             replyToken: replyToken,
-            messages: [{ type: 'text', text: chunks[0] }],
+            messages: [{ type: 'text', text: cleanChunks[0] }],
         });
     }
     catch (err) {
@@ -105,7 +120,7 @@ async function sendSequentialLineReply(userId, replyToken, chunks, delayMs = 120
         try {
             await client.pushMessage({
                 to: userId,
-                messages: [{ type: 'text', text: chunks[0] }],
+                messages: [{ type: 'text', text: cleanChunks[0] }],
             });
         }
         catch (pushErr) {
@@ -113,12 +128,12 @@ async function sendSequentialLineReply(userId, replyToken, chunks, delayMs = 120
         }
     }
     // หน่วงเวลาและส่งบับเบิ้ลถัดไปผ่าน pushMessage
-    for (let i = 1; i < chunks.length; i++) {
+    for (let i = 1; i < cleanChunks.length; i++) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         try {
             await client.pushMessage({
                 to: userId,
-                messages: [{ type: 'text', text: chunks[i] }],
+                messages: [{ type: 'text', text: cleanChunks[i] }],
             });
         }
         catch (pushErr) {

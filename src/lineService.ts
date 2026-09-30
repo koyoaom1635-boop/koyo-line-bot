@@ -24,19 +24,31 @@ function getLineClient(): messagingApi.MessagingApiClient {
   return clientInstance;
 }
 
-// คำสำคัญที่ลูกค้าใช้เพื่อขอคุยกับคนจริง
+import { sanitizeText } from './spellChecker.js';
+
+// คำสำคัญที่ลูกค้าใช้เพื่อขอคุยกับคนจริง (รวมคำที่สะกดผิด พิมพ์ตก หรือภาษาแชท)
 const HUMAN_REQUEST_KEYWORDS = [
   'ขอคุยกับคน',
   'คุยกับคน',
+  'คุยกะคน',
+  'คุยกับคนจิง',
+  'ขอคุยคน',
   'ติดต่อคน',
   'ติดต่อแอดมิน',
   'คุยกับแอดมิน',
+  'คุยกะแอดมิน',
   'ขอคุยแอดมิน',
   'แอดมินอยู่ไหม',
+  'แอดมินอยุ่ไหม',
+  'แอดมินยุไหม',
   'ติดต่อเจ้าหน้าที่',
+  'ติดต่อจนท',
   'ขอสายแอดมิน',
   'คุยกับเจ้าหน้าที่',
   'มีคนอยู่ไหม',
+  'มีคนอยุ่ไหม',
+  'มีคนมั้ย',
+  'มีคนป่าว',
 ];
 
 /**
@@ -82,18 +94,19 @@ async function sendLineReply(
   replyToken: string,
   text: string
 ): Promise<void> {
+  const cleanText = sanitizeText(text);
   const client = getLineClient();
   try {
     await client.replyMessage({
       replyToken: replyToken,
-      messages: [{ type: 'text', text: text }],
+      messages: [{ type: 'text', text: cleanText }],
     });
   } catch (replyError: any) {
     console.warn('⚠️ replyMessage ไม่สำเร็จ กำลังส่งผ่าน pushMessage แทน...');
     try {
       await client.pushMessage({
         to: userId,
-        messages: [{ type: 'text', text: text }],
+        messages: [{ type: 'text', text: cleanText }],
       });
     } catch (pushError: any) {
       console.error('❌ pushMessage เกิดข้อผิดพลาด:', pushError?.message || pushError);
@@ -112,11 +125,14 @@ async function sendSequentialLineReply(
 ): Promise<void> {
   if (!chunks || chunks.length === 0) return;
 
+  const cleanChunks = chunks.map((c) => sanitizeText(c)).filter((c) => c.length > 0);
+  if (cleanChunks.length === 0) return;
+
   const client = getLineClient();
 
   // กรณีมีบับเบิ้ลเดียว ส่งตามปกติทันที
-  if (chunks.length === 1) {
-    await sendLineReply(userId, replyToken, chunks[0]);
+  if (cleanChunks.length === 1) {
+    await sendLineReply(userId, replyToken, cleanChunks[0]);
     return;
   }
 
@@ -124,14 +140,14 @@ async function sendSequentialLineReply(
   try {
     await client.replyMessage({
       replyToken: replyToken,
-      messages: [{ type: 'text', text: chunks[0] }],
+      messages: [{ type: 'text', text: cleanChunks[0] }],
     });
   } catch (err: any) {
     console.warn('⚠️ replyMessage บับเบิ้ลแรกไม่สำเร็จ กำลังส่งผ่าน pushMessage แทน...');
     try {
       await client.pushMessage({
         to: userId,
-        messages: [{ type: 'text', text: chunks[0] }],
+        messages: [{ type: 'text', text: cleanChunks[0] }],
       });
     } catch (pushErr: any) {
       console.error('❌ pushMessage บับเบิ้ลแรกไม่สำเร็จ:', pushErr?.message || pushErr);
@@ -139,12 +155,12 @@ async function sendSequentialLineReply(
   }
 
   // หน่วงเวลาและส่งบับเบิ้ลถัดไปผ่าน pushMessage
-  for (let i = 1; i < chunks.length; i++) {
+  for (let i = 1; i < cleanChunks.length; i++) {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     try {
       await client.pushMessage({
         to: userId,
-        messages: [{ type: 'text', text: chunks[i] }],
+        messages: [{ type: 'text', text: cleanChunks[i] }],
       });
     } catch (pushErr: any) {
       console.error(`❌ pushMessage บับเบิ้ลที่ ${i + 1} ไม่สำเร็จ:`, pushErr?.message || pushErr);
