@@ -27,6 +27,37 @@ const HUMAN_REQUEST_KEYWORDS = [
     'มีคนอยู่ไหม',
 ];
 /**
+ * ฟังก์ชันแยกข้อความตอบกลับของ AI เป็นหลายบับเบิ้ลตามตัวคั่น หรือตามโครงสร้างเนื้อหา
+ */
+function splitAiResponse(aiResponse) {
+    if (!aiResponse)
+        return [];
+    // 1. หากมี delimiter ---SPLIT--- จากโมเดล
+    if (aiResponse.includes('---SPLIT---')) {
+        return aiResponse
+            .split(/---+SPLIT---+/gi)
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0);
+    }
+    // 2. หากมีพิกัดแผนที่ ให้แยกบับเบิ้ลคำตอบกับบับเบิ้ลแผนที่ออกจากกันให้อ่านง่าย
+    const mapIdx = aiResponse.search(/(📍\s*โชว์รูม|https:\/\/maps\.app\.goo\.gl)/);
+    if (mapIdx > 15) {
+        const part1 = aiResponse.slice(0, mapIdx).trim();
+        const part2 = aiResponse.slice(mapIdx).trim();
+        if (part1 && part2) {
+            return [part1, part2];
+        }
+    }
+    // 3. หากมีการเว้นบรรทัดห่างมาก (3 บรรทัดขึ้นไป)
+    if (/\n{3,}/.test(aiResponse)) {
+        return aiResponse
+            .split(/\n{3,}/)
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0);
+    }
+    return [aiResponse.trim()];
+}
+/**
  * ส่งข้อความตอบกลับไปยัง LINE โดยลอง replyMessage ก่อน หากไม่สำเร็จจะ fallback ไป pushMessage
  */
 async function sendLineReply(userId, replyToken, text) {
@@ -47,6 +78,51 @@ async function sendLineReply(userId, replyToken, text) {
         }
         catch (pushError) {
             console.error('❌ pushMessage เกิดข้อผิดพลาด:', pushError?.message || pushError);
+        }
+    }
+}
+/**
+ * ส่งข้อความต่อเนื่องแบบมีจังหวะหน่วงเวลา (Sequential with delay) เพื่อให้อ่านง่ายและเป็นธรรมชาติ
+ */
+async function sendSequentialLineReply(userId, replyToken, chunks, delayMs = 1200) {
+    if (!chunks || chunks.length === 0)
+        return;
+    const client = getLineClient();
+    // กรณีมีบับเบิ้ลเดียว ส่งตามปกติทันที
+    if (chunks.length === 1) {
+        await sendLineReply(userId, replyToken, chunks[0]);
+        return;
+    }
+    // ส่งบับเบิ้ลแรกผ่าน replyMessage
+    try {
+        await client.replyMessage({
+            replyToken: replyToken,
+            messages: [{ type: 'text', text: chunks[0] }],
+        });
+    }
+    catch (err) {
+        console.warn('⚠️ replyMessage บับเบิ้ลแรกไม่สำเร็จ กำลังส่งผ่าน pushMessage แทน...');
+        try {
+            await client.pushMessage({
+                to: userId,
+                messages: [{ type: 'text', text: chunks[0] }],
+            });
+        }
+        catch (pushErr) {
+            console.error('❌ pushMessage บับเบิ้ลแรกไม่สำเร็จ:', pushErr?.message || pushErr);
+        }
+    }
+    // หน่วงเวลาและส่งบับเบิ้ลถัดไปผ่าน pushMessage
+    for (let i = 1; i < chunks.length; i++) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        try {
+            await client.pushMessage({
+                to: userId,
+                messages: [{ type: 'text', text: chunks[i] }],
+            });
+        }
+        catch (pushErr) {
+            console.error(`❌ pushMessage บับเบิ้ลที่ ${i + 1} ไม่สำเร็จ:`, pushErr?.message || pushErr);
         }
     }
 }
@@ -144,8 +220,11 @@ export async function handleLineEvent(event) {
             // บันทึกประวัติการคุย
             appendChatHistory(userId, 'user', combinedText);
             appendChatHistory(userId, 'model', aiResponse);
-            // ส่งคำตอบกลับไปยัง LINE
-            await sendLineReply(userId, latestToken, aiResponse);
+            // แยกข้อความเป็นบับเบิ้ล (ถ้ามีตัวคั่น ---SPLIT--- หรือท่อนแยก)
+            const chunks = splitAiResponse(aiResponse);
+            console.log(`💬 ส่งข้อความทั้งหมด ${chunks.length} บับเบิ้ล (หน่วงเวลา 1.2 วินาทีระหว่างข้อความ)`);
+            // ส่งคำตอบต่อเนื่องแบบมีจังหวะหน่วงเวลาให้อ่านง่าย
+            await sendSequentialLineReply(userId, latestToken, chunks, 1200);
         }
         catch (err) {
             console.error('❌ ข้อผิดพลาดในการตอบกลับ:', err?.message || err);
