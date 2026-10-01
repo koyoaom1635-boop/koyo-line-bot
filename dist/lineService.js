@@ -315,7 +315,7 @@ export async function handleLineEvent(event) {
             cleanCmd === '30') {
             const result = pauseGlobalBot(30 * 60 * 1000);
             const timeStr = new Date(result.pausedUntil).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-            await sendLineReply(userId, replyToken, `🛑 สั่งพัก AI ทั้งระบบ 30 นาที เรียบร้อยแล้วครับ!\n\nแอดมินสามารถคุยกับลูกค้าได้เลยโดยบอทจะไม่ตอบแทรกครับ\n⏰ ระบบจะเปิดตัวเองอัตโนมัติเวลา ${timeStr} น. (หรือพิมพ์ "เปิด" หากคุยเสร็จก่อนครับ)`);
+            await sendLineReply(userId, replyToken, `🔄 รีเซ็ตเวลาพัก AI ทั้งระบบเป็น 30 นาทีใหม่เรียบร้อยแล้วครับ!\n\nแอดมินสามารถคุยกับลูกค้าได้ต่อเนื่องโดยบอทจะไม่ตอบแทรกครับ\n⏰ ระบบเริ่มนับ 30 นาทีใหม่จากตอนนี้ (จะเปิดอัตโนมัติเวลา ${timeStr} น.)\n💡 ทุกครั้งที่ตอบลูกค้า สามารถพิมพ์ "พัก" เพื่อรีเซ็ตเริ่มนับ 30 นาทีใหม่ได้เสมอครับ`);
             return;
         }
         // 3.2 สั่งพัก AI 1 ชั่วโมง (ทั้งระบบ)
