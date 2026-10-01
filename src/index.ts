@@ -46,7 +46,7 @@ function basicAuthMiddleware(req: Request, res: Response, next: NextFunction): v
 app.get('/admin', basicAuthMiddleware, (_req: Request, res: Response) => {
   const status = getGlobalBotStatus();
   const endTimeStr = status.pausedUntil > 0 
-    ? new Date(status.pausedUntil).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) 
+    ? new Date(status.pausedUntil).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) 
     : '';
 
   res.send(`
@@ -71,38 +71,63 @@ app.get('/admin', basicAuthMiddleware, (_req: Request, res: Response) => {
         .card { 
           background: white; 
           border-radius: 20px; 
-          padding: 35px 28px; 
-          max-width: 420px; 
+          padding: 32px 26px; 
+          max-width: 430px; 
           width: 100%; 
           box-shadow: 0 10px 30px rgba(0,0,0,0.08); 
           text-align: center; 
         }
         h1 { font-size: 23px; color: #1c1e21; margin: 0 0 6px; font-weight: 700; }
-        p.subtitle { color: #65676b; font-size: 15px; margin: 0 0 18px; }
+        p.subtitle { color: #65676b; font-size: 14px; margin: 0 0 16px; }
+        .clock-bar {
+          background: #f8f9fa;
+          border-radius: 30px;
+          padding: 6px 16px;
+          font-size: 13px;
+          color: #555;
+          display: inline-block;
+          margin-bottom: 18px;
+          border: 1px solid #e9ecef;
+        }
+        .clock-bar b { color: #1c1e21; font-family: monospace; font-size: 14px; }
         .label { font-size: 14px; color: #65676b; margin-bottom: 8px; }
         .status-badge { 
           display: inline-block; 
-          padding: 8px 20px; 
+          padding: 8px 22px; 
           border-radius: 50px; 
           font-weight: bold; 
           font-size: 15px; 
-          margin-bottom: 22px; 
+          margin-bottom: 18px; 
         }
         .status-on { background: #e7f7ed; color: #0f9d58; }
         .status-off { background: #fce8e6; color: #d93025; }
+        .timer-container {
+          background: #fff5f5;
+          border: 1.5px dashed #ea4335;
+          border-radius: 16px;
+          padding: 16px 10px;
+          margin-bottom: 20px;
+        }
+        .timer-label {
+          font-size: 13px;
+          color: #d93025;
+          font-weight: 600;
+          margin-bottom: 4px;
+        }
         .timer-display {
-          font-size: 42px;
+          font-size: 46px;
           font-weight: 800;
           color: #d93025;
           letter-spacing: 2px;
-          margin: 5px 0 2px;
+          line-height: 1.1;
           font-variant-numeric: tabular-nums;
         }
         .timer-info {
           font-size: 13px;
-          color: #777;
-          margin-bottom: 20px;
+          color: #555;
+          margin-top: 8px;
         }
+        .timer-info b { color: #1c1e21; }
         .btn { 
           display: block; 
           width: 100%; 
@@ -112,7 +137,7 @@ app.get('/admin', basicAuthMiddleware, (_req: Request, res: Response) => {
           font-size: 17px; 
           font-weight: bold; 
           cursor: pointer; 
-          transition: all 0.2s; 
+          transition: all 0.15s; 
           text-decoration: none; 
           color: white; 
           margin-bottom: 12px; 
@@ -127,7 +152,7 @@ app.get('/admin', basicAuthMiddleware, (_req: Request, res: Response) => {
         .footer-note { 
           font-size: 13px; 
           color: #888; 
-          margin-top: 18px; 
+          margin-top: 16px; 
           line-height: 1.6; 
           text-align: center;
         }
@@ -137,6 +162,10 @@ app.get('/admin', basicAuthMiddleware, (_req: Request, res: Response) => {
       <div class="card">
         <h1>🤖 ไม้เทียม Koyo Decor</h1>
         <p class="subtitle">สวิตช์ควบคุมการตอบแชท AI ประจำร้าน</p>
+
+        <div class="clock-bar">
+          🕒 เวลาปัจจุบัน: <b id="currentClock">--:--:--</b> น.
+        </div>
 
         <div class="label">สถานะปัจจุบัน:</div>
         <div>
@@ -150,12 +179,15 @@ app.get('/admin', basicAuthMiddleware, (_req: Request, res: Response) => {
             ? `
               <a href="/admin/toggle?action=pause30" class="btn btn-pause">🛑 กดเพื่อ "พัก AI 30 นาที" (แอดมินตอบเอง)</a>
               <div class="footer-note">
-                * เมื่อกดพัก AI แล้ว บอทจะหยุดตอบ 30 นาที ทำให้แอดมินคุยกับลูกค้าได้อย่างสบายใจไม่มีบอทแทรกครับ
+                * เมื่อกดพัก AI จะหยุดตอบ 30 นาที และเปิดทำงานกลับมาตอบลูกค้าเองอัตโนมัติครับ
               </div>
             `
             : `
-              <div class="timer-display" id="timer">--:--</div>
-              <div class="timer-info">⏳ จะเปิดทำงานอัตโนมัติเวลา: <b>${endTimeStr} น.</b></div>
+              <div class="timer-container">
+                <div class="timer-label">⏳ เวลานับถอยหลังที่เหลือ:</div>
+                <div class="timer-display" id="timer">--:--</div>
+                <div class="timer-info">⏰ จะเปิดทำงานอัตโนมัติเวลา: <b>${endTimeStr} น.</b></div>
+              </div>
 
               <a href="/admin/toggle?action=pause30" class="btn btn-reset">🔄 กดเพื่อ Reset นับ 30 นาทีใหม่</a>
               <a href="/admin/toggle?action=enable" class="btn btn-start">▶️ กดเพื่อ "เปิด AI" (ทำงานตามปกติ)</a>
@@ -166,7 +198,7 @@ app.get('/admin', basicAuthMiddleware, (_req: Request, res: Response) => {
 
               <script>
                 const target = ${status.pausedUntil};
-                function tick() {
+                function tickTimer() {
                   const now = Date.now();
                   const remain = Math.max(0, target - now);
                   const totalSec = Math.floor(remain / 1000);
@@ -180,12 +212,23 @@ app.get('/admin', basicAuthMiddleware, (_req: Request, res: Response) => {
                     }
                   }
                 }
-                setInterval(tick, 1000);
-                tick();
+                setInterval(tickTimer, 1000);
+                tickTimer();
               </script>
             `
         }
       </div>
+
+      <script>
+        function updateLiveClock() {
+          const now = new Date();
+          const timeStr = now.toLocaleTimeString('th-TH', { hour12: false });
+          const clockEl = document.getElementById('currentClock');
+          if (clockEl) clockEl.innerText = timeStr;
+        }
+        setInterval(updateLiveClock, 1000);
+        updateLiveClock();
+      </script>
     </body>
     </html>
   `);
