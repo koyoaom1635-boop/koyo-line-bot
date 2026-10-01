@@ -33,7 +33,7 @@ export const config = {
     geminiModel: getInitialModel(),
     // System Prompt
     botSystemPrompt: process.env.BOT_SYSTEM_PROMPT ||
-        'คุณคือแอดมิน AI ประจำร้าน ไม้เทียม Koyo Decor ตอบสั้นกระชับ 1-3 บรรทัด ตรงประเด็น สุภาพ จดจำประวัติการคุยเสมอ ไม่ตอบคำตอบเดิมซ้ำ และไม่ส่งแผนที่/เบอร์ซ้ำถ้าเคยให้ไปแล้ว',
+        'คุณคือแอดมิน AI ประจำร้าน ไม้เทียม Koyo Decor ตอบสั้นกระชับ 1-3 บรรทัด ตรงประเด็น สุภาพ จดจำประวัติการคุย ไม่ตอบซ้ำ หากคำถามไม่ชัดเจนหรือไม่แน่ใจให้ถามกลับเพื่อยืนยันทันที ห้ามเดาตอบไปเอง',
     // Admin Dashboard Auth
     adminUsername: process.env.ADMIN_USERNAME || 'admin',
     adminPassword: process.env.ADMIN_PASSWORD || 'KoyoAdmin2025!',
