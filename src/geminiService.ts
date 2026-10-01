@@ -13,13 +13,13 @@ function getAIClient(): GoogleGenAI {
 }
 
 // รายการโมเดลสำรองกรณีโมเดลหลักติดคิว (High Demand / 503 / 429)
-// เรียงตามลำดับความสามารถ → ประหยัด
+// เรียงตามความเร็วและความเสถียร
 const FALLBACK_MODELS = [
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-8b',
-  'gemini-1.5-pro',
+  'gemini-flash-lite-latest',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
 ];
 
 /**
@@ -139,7 +139,12 @@ export async function askGeminiWithImage(
 
   const ai = getAIClient();
   // Vision ใช้ได้เฉพาะโมเดลที่รองรับ multimodal
-  const visionModels = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.5-flash'];
+  const visionModels = [
+    'gemini-flash-lite-latest',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3.8-flash',
+  ];
   const modelsToTry = [
     config.geminiModel,
     ...visionModels.filter((m) => m !== config.geminiModel),

@@ -2,19 +2,20 @@ import dotenv from 'dotenv';
 dotenv.config();
 function getInitialModel() {
     const m = process.env.GEMINI_MODEL;
-    // โมเดลเริ่มต้น: gemini-2.0-flash (เร็ว ประหยัด ดีสำหรับแชทบอท)
+    // โมเดลเริ่มต้น: gemini-flash-lite-latest (เร็ว เสถียร ตอบไวมากสำหรับแชทบอท)
     const validModels = [
+        'gemini-flash-lite-latest',
+        'gemini-3.5-flash-lite',
+        'gemini-3.1-flash-lite',
+        'gemini-3.8-flash',
+        'gemini-3.7-flash',
+        'gemini-3.5-flash',
+        'gemini-flash-latest',
         'gemini-2.5-flash',
-        'gemini-2.5-flash-lite',
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-lite',
-        'gemini-1.5-flash',
-        'gemini-1.5-flash-8b',
-        'gemini-1.5-pro',
     ];
     if (m && validModels.includes(m))
         return m;
-    return 'gemini-2.0-flash';
+    return 'gemini-flash-lite-latest';
 }
 function getDefaultGeminiKey() {
     const b64 = 'QVEuQWI4Uk42SWdIRmtIdWVxWEtWOHFtSTA4b20tb0ZtYmc5M3FqSlYzempNZ3lRZTVOTlE=';
