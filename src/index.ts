@@ -41,12 +41,13 @@ function basicAuthMiddleware(req: Request, res: Response, next: NextFunction): v
 }
 
 // ==========================================
-// Admin Dashboard — ต้อง Login ก่อนเข้า
+// Admin Dashboard — หน้าควบคุม AI ประจำร้าน (เรียบง่าย สบายตา)
 // ==========================================
 app.get('/admin', basicAuthMiddleware, (_req: Request, res: Response) => {
   const status = getGlobalBotStatus();
-  const quickPauseUrl = `/pause?key=${encodeURIComponent(config.adminPassword)}&mins=30`;
-  const resumeUrl = `/resume?key=${encodeURIComponent(config.adminPassword)}`;
+  const endTimeStr = status.pausedUntil > 0 
+    ? new Date(status.pausedUntil).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) 
+    : '';
 
   res.send(`
     <!DOCTYPE html>
@@ -54,60 +55,136 @@ app.get('/admin', basicAuthMiddleware, (_req: Request, res: Response) => {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>สวิตช์เปิด-ปิด LINE AI Bot</title>
+      <title>ไม้เทียม Koyo Decor - ควบคุม AI</title>
       <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
-        .card { background: white; border-radius: 16px; padding: 28px 24px; max-width: 440px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.08); text-align: center; }
-        h1 { font-size: 22px; color: #1c1e21; margin-bottom: 6px; }
-        p { color: #65676b; font-size: 14px; margin-top: 0; }
-        .status-badge { display: inline-block; padding: 8px 18px; border-radius: 50px; font-weight: bold; font-size: 15px; margin: 12px 0 20px; }
+        * { box-sizing: border-box; }
+        body { 
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
+          background: #f0f2f5; 
+          display: flex; 
+          justify-content: center; 
+          align-items: center; 
+          min-height: 100vh; 
+          margin: 0; 
+          padding: 20px; 
+        }
+        .card { 
+          background: white; 
+          border-radius: 20px; 
+          padding: 35px 28px; 
+          max-width: 420px; 
+          width: 100%; 
+          box-shadow: 0 10px 30px rgba(0,0,0,0.08); 
+          text-align: center; 
+        }
+        h1 { font-size: 23px; color: #1c1e21; margin: 0 0 6px; font-weight: 700; }
+        p.subtitle { color: #65676b; font-size: 15px; margin: 0 0 18px; }
+        .label { font-size: 14px; color: #65676b; margin-bottom: 8px; }
+        .status-badge { 
+          display: inline-block; 
+          padding: 8px 20px; 
+          border-radius: 50px; 
+          font-weight: bold; 
+          font-size: 15px; 
+          margin-bottom: 22px; 
+        }
         .status-on { background: #e7f7ed; color: #0f9d58; }
         .status-off { background: #fce8e6; color: #d93025; }
-        .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s; text-decoration: none; color: white; margin-bottom: 10px; box-sizing: border-box; }
-        .btn-pause-30 { background: #ea4335; }
-        .btn-pause-30:hover { background: #d93025; }
-        .btn-pause-60 { background: #f27011; }
-        .btn-pause-60:hover { background: #e06000; }
-        .btn-pause-inf { background: #757575; font-size: 14px; padding: 10px; }
+        .timer-display {
+          font-size: 42px;
+          font-weight: 800;
+          color: #d93025;
+          letter-spacing: 2px;
+          margin: 5px 0 2px;
+          font-variant-numeric: tabular-nums;
+        }
+        .timer-info {
+          font-size: 13px;
+          color: #777;
+          margin-bottom: 20px;
+        }
+        .btn { 
+          display: block; 
+          width: 100%; 
+          padding: 16px; 
+          border: none; 
+          border-radius: 14px; 
+          font-size: 17px; 
+          font-weight: bold; 
+          cursor: pointer; 
+          transition: all 0.2s; 
+          text-decoration: none; 
+          color: white; 
+          margin-bottom: 12px; 
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn-pause { background: #ea4335; }
+        .btn-pause:hover { background: #d93025; }
+        .btn-reset { background: #1a73e8; }
+        .btn-reset:hover { background: #1557b0; }
         .btn-start { background: #00c300; }
         .btn-start:hover { background: #00aa00; }
-        .info-box { background: #f8f9fa; border-radius: 10px; padding: 14px; font-size: 13px; color: #444; margin-top: 18px; text-align: left; line-height: 1.6; border: 1px solid #e9ecef; }
-        .quick-link-box { background: #e8f4fd; border-radius: 8px; padding: 10px; font-size: 12px; word-break: break-all; margin-top: 8px; color: #1a73e8; }
+        .footer-note { 
+          font-size: 13px; 
+          color: #888; 
+          margin-top: 18px; 
+          line-height: 1.6; 
+          text-align: center;
+        }
       </style>
     </head>
     <body>
       <div class="card">
         <h1>🤖 ไม้เทียม Koyo Decor</h1>
-        <p>ระบบควบคุมการตอบแชท AI ประจำร้าน</p>
+        <p class="subtitle">สวิตช์ควบคุมการตอบแชท AI ประจำร้าน</p>
+
+        <div class="label">สถานะปัจจุบัน:</div>
         <div>
-          สถานะปัจจุบัน:<br/>
           <span class="status-badge ${status.isEnabled ? 'status-on' : 'status-off'}">
-            ${status.isEnabled ? '🟢 AI กำลังทำงาน (ตอบอัตโนมัติ)' : `🔴 AI กำลังพัก (เหลือ ${status.remainingMinutes} นาที จะเปิดอัตโนมัติ)`}
+            ${status.isEnabled ? '🟢 AI กำลังทำงาน (ตอบอัตโนมัติ)' : '🔴 AI กำลังพัก (แอดมินตอบเอง)'}
           </span>
         </div>
 
         ${
           status.isEnabled
             ? `
-              <a href="/admin/toggle?action=pause30" class="btn btn-pause-30">🛑 พัก AI 30 นาที (เปิดอัตโนมัติ)</a>
-              <a href="/admin/toggle?action=pause60" class="btn btn-pause-60">⏳ พัก AI 1 ชั่วโมง (เปิดอัตโนมัติ)</a>
-              <a href="/admin/toggle?action=disable" class="btn btn-pause-inf">🛑 พัก AI แบบไม่จำกัดเวลา</a>
+              <a href="/admin/toggle?action=pause30" class="btn btn-pause">🛑 กดเพื่อ "พัก AI 30 นาที" (แอดมินตอบเอง)</a>
+              <div class="footer-note">
+                * เมื่อกดพัก AI แล้ว บอทจะหยุดตอบ 30 นาที ทำให้แอดมินคุยกับลูกค้าได้อย่างสบายใจไม่มีบอทแทรกครับ
+              </div>
             `
             : `
-              <a href="/admin/toggle?action=enable" class="btn btn-start">▶️ เปิด AI ทันที (กลับมาตอบตามปกติ)</a>
+              <div class="timer-display" id="timer">--:--</div>
+              <div class="timer-info">⏳ จะเปิดทำงานอัตโนมัติเวลา: <b>${endTimeStr} น.</b></div>
+
+              <a href="/admin/toggle?action=pause30" class="btn btn-reset">🔄 กดเพื่อ Reset นับ 30 นาทีใหม่</a>
+              <a href="/admin/toggle?action=enable" class="btn btn-start">▶️ กดเพื่อ "เปิด AI" (ทำงานตามปกติ)</a>
+
+              <div class="footer-note">
+                * <b>เมื่อแอดมินตอบลูกค้าทุกครั้ง</b> ให้กดปุ่ม <b>"Reset นับ 30 นาทีใหม่"</b> เพื่อเริ่มนับเวลาใหม่เสมอครับ
+              </div>
+
+              <script>
+                const target = ${status.pausedUntil};
+                function tick() {
+                  const now = Date.now();
+                  const remain = Math.max(0, target - now);
+                  const totalSec = Math.floor(remain / 1000);
+                  const m = Math.floor(totalSec / 60);
+                  const s = totalSec % 60;
+                  const el = document.getElementById('timer');
+                  if (el) {
+                    el.innerText = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+                    if (remain <= 0) {
+                      location.reload();
+                    }
+                  }
+                }
+                setInterval(tick, 1000);
+                tick();
+              </script>
             `
         }
-
-        <div class="info-box">
-          <b>⚡ วิธีสั่งพัก 30 นาที โดยไม่ต้องเข้าหน้านี้:</b>
-          <br/>
-          1. <b>บันทึก Link ลัดไว้บนมือถือ (กดครั้งเดียว พัก 30 นาทีทันที):</b>
-          <div class="quick-link-box">
-            <a href="${quickPauseUrl}" target="_blank">คลิกเพื่อพัก 30 นาที (ไม่ต้องพิมพ์รหัส)</a>
-          </div>
-          <br/>
-          2. <b>หรือพิมพ์สั่งใน LINE:</b> พิมพ์คำว่า <code>พัก 30</code> หรือ <code>เปิด</code> ส่งให้บอทใน LINE ได้เลยครับ
-        </div>
       </div>
     </body>
     </html>
@@ -116,12 +193,9 @@ app.get('/admin', basicAuthMiddleware, (_req: Request, res: Response) => {
 
 app.get('/admin/toggle', basicAuthMiddleware, (req: Request, res: Response) => {
   const action = req.query.action as string;
-  if (action === 'pause30') {
+  if (action === 'pause30' || action === 'disable') {
+    // รีเซ็ตเริ่มนับ 30 นาทีใหม่เสมอ
     pauseGlobalBot(30 * 60 * 1000);
-  } else if (action === 'pause60') {
-    pauseGlobalBot(60 * 60 * 1000);
-  } else if (action === 'disable') {
-    setGlobalBotEnabled(false, 0); // ไม่จำกัดเวลา
   } else if (action === 'enable') {
     resumeGlobalBot();
   }
