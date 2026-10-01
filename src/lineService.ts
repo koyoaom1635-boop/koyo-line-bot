@@ -253,7 +253,7 @@ export async function handleLineEvent(event: webhook.Event): Promise<void> {
         messages: [
           {
             type: 'text',
-            text: 'สวัสดีครับ! ยินดีต้อนรับสู่ ร้านไม้เทียม Koyo Decor ครับ 🙏✨\nสนใจสอบถามข้อมูลไม้เทียม WPC, ไม้ ASA หรือแผ่นผนังรุ่นไหน พิมพ์บอกขนาดพื้นที่หรือสิ่งที่ต้องการได้เลยครับ!',
+            text: 'สวัสดีครับ ร้านไม้เทียม Koyo Decor ยินดีให้บริการครับ 🙏\nพิมพ์สอบถามสินค้าหรือขนาดพื้นที่ได้เลยครับ',
           },
         ],
       });
@@ -281,7 +281,7 @@ export async function handleLineEvent(event: webhook.Event): Promise<void> {
     await sendLineReply(
       userId,
       replyToken,
-      '⏳ ส่งข้อความถี่เกินไปครับ กรุณารอสักครู่แล้วลองใหม่อีกครั้งนะครับ 🙏'
+      'รอสักครู่นะครับ 🙏'
     );
     return;
   }
@@ -296,7 +296,7 @@ export async function handleLineEvent(event: webhook.Event): Promise<void> {
     await sendLineReply(
       userId,
       replyToken,
-      '📷 ได้รับรูปภาพแล้วครับ กำลังวิเคราะห์หน้างานให้สักครู่นะครับ...'
+      'ได้รับรูปแล้วครับ สักครู่นะครับ 📷'
     );
 
     const imageData = await fetchLineImageAsBase64(message.id);
@@ -305,7 +305,7 @@ export async function handleLineEvent(event: webhook.Event): Promise<void> {
         to: userId,
         messages: [{
           type: 'text',
-          text: 'ขออภัยครับ ดาวน์โหลดรูปภาพไม่สำเร็จ กรุณาส่งรูปใหม่อีกครั้ง หรือแจ้งขนาดพื้นที่เป็นตัวเลขได้เลยครับ',
+          text: 'ดาวน์โหลดรูปไม่สำเร็จ รบกวนส่งใหม่อีกครั้งนะครับ',
         }],
       });
       return;
@@ -336,7 +336,7 @@ export async function handleLineEvent(event: webhook.Event): Promise<void> {
     await sendLineReply(
       userId,
       replyToken,
-      'ขอบคุณสำหรับข้อความครับ หากต้องการสอบถามข้อมูลสินค้า สามารถพิมพ์เป็นข้อความหรือส่งรูปหน้างานมาได้เลยนะครับ 😊'
+      'พิมพ์สอบถามสินค้าหรือส่งรูปหน้างานได้เลยครับ 😊'
     );
     return;
   }
@@ -497,7 +497,7 @@ export async function handleLineEvent(event: webhook.Event): Promise<void> {
     await sendLineReply(
       userId,
       replyToken,
-      'รับทราบครับผม ขออนุญาตประสานงานให้แอดมินเข้ามาดูแลสักครู่นะครับ 🙏 เจ้าหน้าที่จะรีบตอบกลับให้เร็วที่สุดครับ'
+      'รอแอดมินสักครู่นะครับ 🙏'
     );
     return;
   }

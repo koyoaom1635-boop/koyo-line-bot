@@ -217,7 +217,7 @@ export async function handleLineEvent(event) {
                 messages: [
                     {
                         type: 'text',
-                        text: 'สวัสดีครับ! ยินดีต้อนรับสู่ ร้านไม้เทียม Koyo Decor ครับ 🙏✨\nสนใจสอบถามข้อมูลไม้เทียม WPC, ไม้ ASA หรือแผ่นผนังรุ่นไหน พิมพ์บอกขนาดพื้นที่หรือสิ่งที่ต้องการได้เลยครับ!',
+                        text: 'สวัสดีครับ ร้านไม้เทียม Koyo Decor ยินดีให้บริการครับ 🙏\nพิมพ์สอบถามสินค้าหรือขนาดพื้นที่ได้เลยครับ',
                     },
                 ],
             });
@@ -238,7 +238,7 @@ export async function handleLineEvent(event) {
     // =========================================
     if (isRateLimited(userId)) {
         console.warn(`🚫 Rate Limited: ${userId.slice(-6)} ส่งข้อความเกิน 10 ครั้ง/นาที`);
-        await sendLineReply(userId, replyToken, '⏳ ส่งข้อความถี่เกินไปครับ กรุณารอสักครู่แล้วลองใหม่อีกครั้งนะครับ 🙏');
+        await sendLineReply(userId, replyToken, 'รอสักครู่นะครับ 🙏');
         return;
     }
     // =========================================
@@ -248,14 +248,14 @@ export async function handleLineEvent(event) {
         if (isUserPaused(userId))
             return;
         console.log(`🖼️ ได้รับรูปภาพจาก [${userId.slice(-6)}] — กำลังวิเคราะห์ด้วย Gemini Vision...`);
-        await sendLineReply(userId, replyToken, '📷 ได้รับรูปภาพแล้วครับ กำลังวิเคราะห์หน้างานให้สักครู่นะครับ...');
+        await sendLineReply(userId, replyToken, 'ได้รับรูปแล้วครับ สักครู่นะครับ 📷');
         const imageData = await fetchLineImageAsBase64(message.id);
         if (!imageData) {
             await client.pushMessage({
                 to: userId,
                 messages: [{
                         type: 'text',
-                        text: 'ขออภัยครับ ดาวน์โหลดรูปภาพไม่สำเร็จ กรุณาส่งรูปใหม่อีกครั้ง หรือแจ้งขนาดพื้นที่เป็นตัวเลขได้เลยครับ',
+                        text: 'ดาวน์โหลดรูปไม่สำเร็จ รบกวนส่งใหม่อีกครั้งนะครับ',
                     }],
             });
             return;
@@ -281,7 +281,7 @@ export async function handleLineEvent(event) {
     if (message.type !== 'text') {
         if (isUserPaused(userId))
             return;
-        await sendLineReply(userId, replyToken, 'ขอบคุณสำหรับข้อความครับ หากต้องการสอบถามข้อมูลสินค้า สามารถพิมพ์เป็นข้อความหรือส่งรูปหน้างานมาได้เลยนะครับ 😊');
+        await sendLineReply(userId, replyToken, 'พิมพ์สอบถามสินค้าหรือส่งรูปหน้างานได้เลยครับ 😊');
         return;
     }
     const rawText = message.text.trim();
@@ -386,7 +386,7 @@ export async function handleLineEvent(event) {
             `ข้อความ: "${rawText}"\n` +
             `เวลา: ${new Date().toLocaleString('th-TH')}\n` +
             `⚠️ AI พักการตอบห้องนี้ 30 นาทีแล้ว รอแอดมินเข้าดูแลครับ`);
-        await sendLineReply(userId, replyToken, 'รับทราบครับผม ขออนุญาตประสานงานให้แอดมินเข้ามาดูแลสักครู่นะครับ 🙏 เจ้าหน้าที่จะรีบตอบกลับให้เร็วที่สุดครับ');
+        await sendLineReply(userId, replyToken, 'รอแอดมินสักครู่นะครับ 🙏');
         return;
     }
     // ==========================================
