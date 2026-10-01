@@ -28,6 +28,7 @@ const SPELL_RULES: ReplacementRule[] = [
   { pattern: /ประมาณการณ์/g, replacement: 'ประมาณการ' },
   { pattern: /กรุณารอสักครุ่/g, replacement: 'กรุณารอสักครู่' },
   { pattern: /รับรอง/g, replacement: 'รับรอง' },
+  { pattern: /เมคร/g, replacement: 'เมตร' },
 
   // ชื่อแบรนด์และบริษัท
   { pattern: /โคโย\s*เดคอ(?!ร์)/g, replacement: 'โคโย เดคคอร์' },
