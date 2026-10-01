@@ -6,8 +6,31 @@ import { isGlobalBotEnabled, setGlobalBotEnabled } from './sessionManager.js';
 const app = express();
 // ตรวจสอบความถูกต้องของ Configuration
 validateConfig();
-// Admin Dashboard สำหรับสลับโหมด พัก AI / เปิด AI ได้จากมือถือหรือบราวเซอร์
-app.get('/admin', (_req, res) => {
+// ==========================================
+// Basic Authentication Middleware สำหรับ Admin
+// ==========================================
+function basicAuthMiddleware(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Basic ')) {
+        res.setHeader('WWW-Authenticate', 'Basic realm="Koyo Admin Dashboard"');
+        res.status(401).send('กรุณาล็อกอินก่อนเข้าใช้งานครับ');
+        return;
+    }
+    const base64 = authHeader.slice('Basic '.length);
+    const decoded = Buffer.from(base64, 'base64').toString('utf-8');
+    const [username, password] = decoded.split(':');
+    if (username === config.adminUsername && password === config.adminPassword) {
+        next();
+    }
+    else {
+        res.setHeader('WWW-Authenticate', 'Basic realm="Koyo Admin Dashboard"');
+        res.status(401).send('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้องครับ');
+    }
+}
+// ==========================================
+// Admin Dashboard — ต้อง Login ก่อนเข้า
+// ==========================================
+app.get('/admin', basicAuthMiddleware, (_req, res) => {
     const isEnabled = isGlobalBotEnabled();
     res.send(`
     <!DOCTYPE html>
@@ -29,6 +52,7 @@ app.get('/admin', (_req, res) => {
         .btn-pause:hover { background: #d93025; }
         .btn-start { background: #00c300; }
         .btn-start:hover { background: #00aa00; }
+        .info-box { background: #f8f9fa; border-radius: 10px; padding: 12px; font-size: 13px; color: #555; margin-top: 16px; text-align: left; line-height: 1.7; }
       </style>
     </head>
     <body>
@@ -44,15 +68,16 @@ app.get('/admin', (_req, res) => {
         ${isEnabled
         ? '<a href="/admin/toggle?action=disable" class="btn btn-pause">🛑 กดเพื่อ "พัก AI" (แอดมินตอบเอง)</a>'
         : '<a href="/admin/toggle?action=enable" class="btn btn-start">▶️ กดเพื่อ "เปิด AI" (ทำงานตามปกติ)</a>'}
-        <p style="font-size: 13px; color: #888; margin-top: 15px;">
-          * เมื่อกดพัก AI แล้ว AI จะหยุดตอบลูกค้าทุกคนทันที ทำให้แอดมินคุยกับลูกค้าได้อย่างสบายใจไม่มีบอทมาแทรกครับ
-        </p>
+        <div class="info-box">
+          ℹ️ เมื่อกด <b>พัก AI</b> บอทจะหยุดตอบลูกค้าทุกคนทันที ทำให้แอดมินคุยกับลูกค้าได้สะดวกไม่มีบอทแทรกครับ<br/><br/>
+          🤖 Model: <b>${config.geminiModel}</b>
+        </div>
       </div>
     </body>
     </html>
   `);
 });
-app.get('/admin/toggle', (req, res) => {
+app.get('/admin/toggle', basicAuthMiddleware, (req, res) => {
     const action = req.query.action;
     if (action === 'disable') {
         setGlobalBotEnabled(false);
@@ -62,26 +87,21 @@ app.get('/admin/toggle', (req, res) => {
     }
     res.redirect('/admin');
 });
+// ==========================================
 // Health Check Endpoint
+// ==========================================
 app.get('/', (_req, res) => {
     res.json({
         status: 'online',
         message: 'LINE AI Bot (ไม้เทียม Koyo Decor) is running!',
         model: config.geminiModel,
-        diagnostics: {
-            hasSecret: Boolean(config.lineChannelSecret),
-            secretLength: config.lineChannelSecret.length,
-            secretPrefix: config.lineChannelSecret.slice(0, 4),
-            hasSecretFallback: Boolean(config.lineChannelSecretFallback),
-            hasToken: Boolean(config.lineChannelAccessToken),
-            tokenLength: config.lineChannelAccessToken.length,
-            hasGeminiKey: Boolean(config.geminiApiKey),
-        },
+        botEnabled: isGlobalBotEnabled(),
         timestamp: new Date().toISOString(),
     });
 });
+// ==========================================
 // LINE Webhook Endpoint
-// ใช้ express.raw เพื่ออ่านข้อมูลดิบและคำนวณ HMAC-SHA256 ตรวจสอบความถูกต้องของ x-line-signature
+// ==========================================
 app.post('/webhook', express.raw({ type: '*/*' }), async (req, res) => {
     const signature = req.headers['x-line-signature'];
     const rawBody = req.body instanceof Buffer ? req.body.toString('utf-8') : (req.body || '');
@@ -89,7 +109,6 @@ app.post('/webhook', express.raw({ type: '*/*' }), async (req, res) => {
     const secrets = [config.lineChannelSecret, config.lineChannelSecretFallback].filter(Boolean);
     let isValid = false;
     if (!signature) {
-        // ในบางกรณีที่ทดสอบยิงเองโดยไม่มี header
         console.warn('⚠️ ได้รับ Request ที่ไม่มี x-line-signature header');
     }
     else {
@@ -138,6 +157,7 @@ const server = app.listen(config.port, () => {
     console.log(`🚀 LINE AI Bot Server กำลังทำงานที่พอร์ต: ${config.port}`);
     console.log(`🌐 ตรวจสอบสถานะเซิร์ฟเวอร์: http://localhost:${config.port}/`);
     console.log(`📡 Webhook URL ปลายทาง: http://localhost:${config.port}/webhook`);
+    console.log(`🔐 Admin Dashboard: http://localhost:${config.port}/admin`);
     console.log('====================================================');
 });
 // ดักจับการปิดโปรแกรม

@@ -12,13 +12,23 @@ export interface UserSession {
   debounceTimer: NodeJS.Timeout | null;
   history: ChatMessage[];
   lastActive: number;
+  // Rate Limiting
+  messageTimestamps: number[];
 }
 
 const sessions = new Map<string, UserSession>();
 
-const MAX_HISTORY = 8;
+const MAX_HISTORY = 10;
 const DEFAULT_PAUSE_DURATION = 60 * 60 * 1000; // 1 ชั่วโมง
 const DEBOUNCE_WAIT_MS = 3500; // รอ 3.5 วินาทีเพื่อรวมข้อความรัวๆ
+
+// Rate Limiting: จำกัดสูงสุด 10 ข้อความ ต่อ 1 นาที ต่อผู้ใช้
+const RATE_LIMIT_COUNT = 10;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+
+// Session Cleanup: ล้าง session ที่ไม่ active เกิน 24 ชั่วโมง
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 30 * 60 * 1000; // cleanup ทุก 30 นาที
 
 let isGlobalEnabled = true;
 
@@ -49,6 +59,7 @@ function getOrCreateSession(userId: string): UserSession {
       debounceTimer: null,
       history: [],
       lastActive: Date.now(),
+      messageTimestamps: [],
     };
     sessions.set(userId, session);
   }
@@ -119,6 +130,26 @@ export function appendChatHistory(userId: string, role: 'user' | 'model', text: 
 }
 
 /**
+ * ตรวจสอบ Rate Limit: คืน true หากส่งข้อความมากเกิน 10 ครั้ง/นาที
+ */
+export function isRateLimited(userId: string): boolean {
+  const session = getOrCreateSession(userId);
+  const now = Date.now();
+
+  // กรองเฉพาะ timestamps ภายใน window
+  session.messageTimestamps = session.messageTimestamps.filter(
+    (ts) => now - ts < RATE_LIMIT_WINDOW_MS
+  );
+
+  if (session.messageTimestamps.length >= RATE_LIMIT_COUNT) {
+    return true;
+  }
+
+  session.messageTimestamps.push(now);
+  return false;
+}
+
+/**
  * บัฟเฟอร์ข้อความเพื่อรวบรวมข้อความที่ส่งมาติดๆ กันใน 3.5 วินาที
  */
 export function bufferMessage(
@@ -146,3 +177,31 @@ export function bufferMessage(
     }
   }, DEBOUNCE_WAIT_MS);
 }
+
+/**
+ * ล้าง session ที่ไม่มีการใช้งานเกิน SESSION_TTL_MS (24 ชั่วโมง)
+ * เพื่อป้องกัน Memory Leak
+ */
+function cleanupInactiveSessions(): void {
+  const now = Date.now();
+  let cleaned = 0;
+
+  for (const [userId, session] of sessions.entries()) {
+    if (now - session.lastActive > SESSION_TTL_MS) {
+      // ยกเลิก debounce timer ก่อนลบ
+      if (session.debounceTimer) {
+        clearTimeout(session.debounceTimer);
+      }
+      sessions.delete(userId);
+      cleaned++;
+    }
+  }
+
+  if (cleaned > 0) {
+    console.log(`🧹 Session Cleanup: ล้าง ${cleaned} session ที่ไม่ active (เหลือ ${sessions.size} sessions)`);
+  }
+}
+
+// เริ่ม cleanup interval ทุก 30 นาที
+setInterval(cleanupInactiveSessions, CLEANUP_INTERVAL_MS);
+console.log(`⏰ Session Cleanup เริ่มทำงานทุก ${CLEANUP_INTERVAL_MS / 60000} นาที`);

@@ -11,6 +11,7 @@ export interface UserSession {
     debounceTimer: NodeJS.Timeout | null;
     history: ChatMessage[];
     lastActive: number;
+    messageTimestamps: number[];
 }
 /**
  * ตรวจสอบว่าระบบบอทเปิดทำงานอยู่หรือไม่ (Master Switch)
@@ -40,6 +41,10 @@ export declare function getChatHistory(userId: string): ChatMessage[];
  * บันทึกข้อความลงประวัติการสนทนา
  */
 export declare function appendChatHistory(userId: string, role: 'user' | 'model', text: string): void;
+/**
+ * ตรวจสอบ Rate Limit: คืน true หากส่งข้อความมากเกิน 10 ครั้ง/นาที
+ */
+export declare function isRateLimited(userId: string): boolean;
 /**
  * บัฟเฟอร์ข้อความเพื่อรวบรวมข้อความที่ส่งมาติดๆ กันใน 3.5 วินาที
  */

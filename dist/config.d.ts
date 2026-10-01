@@ -6,6 +6,9 @@ export interface AppConfig {
     geminiApiKey: string;
     geminiModel: string;
     botSystemPrompt: string;
+    adminUsername: string;
+    adminPassword: string;
+    adminLineUserId: string;
 }
 export declare const config: AppConfig;
 export declare function validateConfig(): void;

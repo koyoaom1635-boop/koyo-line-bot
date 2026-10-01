@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Part } from '@google/genai';
 import { config } from './config.js';
 import { KOYO_STORE_KNOWLEDGE } from './knowledge.js';
 import { ChatMessage } from './sessionManager.js';
@@ -13,14 +13,13 @@ function getAIClient(): GoogleGenAI {
 }
 
 // รายการโมเดลสำรองกรณีโมเดลหลักติดคิว (High Demand / 503 / 429)
+// เรียงตามลำดับความสามารถ → ประหยัด
 const FALLBACK_MODELS = [
-  'gemini-3.5-flash-lite',
-  'gemini-3.1-flash-lite',
-  'gemini-3-flash-preview',
-  'gemini-3.1-flash-lite-preview',
-  'gemini-3.5-flash',
-  'gemini-3.7-flash',
-  'gemini-3.8-flash',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
+  'gemini-1.5-pro',
 ];
 
 /**
@@ -72,7 +71,7 @@ export async function askGemini(
   userMessage: string,
   history: ChatMessage[] = []
 ): Promise<string> {
-  if (!config.geminiApiKey || config.geminiApiKey.includes('your_gemini_api_key')) {
+  if (!config.geminiApiKey) {
     return 'ขออภัยครับ ยังไม่ได้ตั้งค่า GEMINI_API_KEY ในไฟล์ .env';
   }
 
@@ -102,13 +101,16 @@ export async function askGemini(
         contents: contents,
         config: {
           systemInstruction: systemInstruction,
-          maxOutputTokens: 300,
+          maxOutputTokens: 700,
           temperature: 0.6,
         },
       });
 
       const replyText = response.text?.trim();
       if (replyText) {
+        if (model !== config.geminiModel) {
+          console.log(`✅ ตอบสำเร็จด้วย fallback model: ${model}`);
+        }
         return replyText;
       }
     } catch (error: any) {
@@ -119,4 +121,80 @@ export async function askGemini(
 
   console.error('❌ เกิดข้อผิดพลาดจาก Gemini API ทุกโมเดล:', lastError?.message || lastError);
   return 'ขออภัยครับ ขณะนี้ระบบขัดข้องชั่วคราว กรุณารอแอดมินสักครู่นะครับ 🙏';
+}
+
+/**
+ * ส่งรูปภาพ + ข้อความไปยัง Gemini Vision API เพื่อวิเคราะห์รูปหน้างานของลูกค้า
+ */
+export async function askGeminiWithImage(
+  imageBase64: string,
+  mimeType: string,
+  captionText: string,
+  history: ChatMessage[] = []
+): Promise<string> {
+  if (!config.geminiApiKey) {
+    return 'ขออภัยครับ ยังไม่ได้ตั้งค่า GEMINI_API_KEY ในไฟล์ .env';
+  }
+
+  const ai = getAIClient();
+  // Vision ใช้ได้เฉพาะโมเดลที่รองรับ multimodal
+  const visionModels = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.5-flash'];
+  const modelsToTry = [
+    config.geminiModel,
+    ...visionModels.filter((m) => m !== config.geminiModel),
+  ];
+  const systemInstruction = buildSystemInstruction();
+
+  const imagePart: Part = {
+    inlineData: {
+      mimeType: mimeType as 'image/jpeg' | 'image/png' | 'image/webp',
+      data: imageBase64,
+    },
+  };
+
+  const textPart: Part = {
+    text: captionText ||
+      'ลูกค้าส่งรูปภาพมา กรุณาวิเคราะห์รูปหน้างานและแนะนำสินค้าที่เหมาะสมจากร้าน KOYO DECOR พร้อมประเมินงานเบื้องต้น',
+  };
+
+  // สร้าง context ประวัติการคุย (text only) + รูปปัจจุบัน
+  const contents: any[] = [];
+  for (const h of history) {
+    contents.push({
+      role: h.role === 'model' ? 'model' : 'user',
+      parts: [{ text: h.parts }],
+    });
+  }
+  contents.push({
+    role: 'user',
+    parts: [imagePart, textPart],
+  });
+
+  let lastError: any = null;
+
+  for (const model of modelsToTry) {
+    try {
+      const response = await ai.models.generateContent({
+        model: model,
+        contents: contents,
+        config: {
+          systemInstruction: systemInstruction,
+          maxOutputTokens: 700,
+          temperature: 0.6,
+        },
+      });
+
+      const replyText = response.text?.trim();
+      if (replyText) {
+        console.log(`🖼️ Vision ตอบสำเร็จด้วยโมเดล: ${model}`);
+        return replyText;
+      }
+    } catch (error: any) {
+      lastError = error;
+      console.warn(`⚠️ Vision โมเดล ${model} เกิดข้อผิดพลาด (${error?.message?.slice(0, 80)}...) กำลังลองถัดไป...`);
+    }
+  }
+
+  console.error('❌ Vision API ล้มเหลวทุกโมเดล:', lastError?.message || lastError);
+  return 'ได้รับรูปภาพเรียบร้อยแล้วครับ 📷 ขออภัยที่ระบบวิเคราะห์รูปชั่วคราวไม่พร้อม กรุณาแจ้งขนาดพื้นที่ (กว้าง x ยาว เมตร) เพิ่มเติมเพื่อให้แอดมินช่วยประเมินราคาได้ครับ';
 }
