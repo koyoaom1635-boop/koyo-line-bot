@@ -10,6 +10,11 @@ import {
   getChatHistory,
   appendChatHistory,
   bufferMessage,
+  pauseGlobalBot,
+  resumeGlobalBot,
+  getGlobalBotStatus,
+  getAdminLineUserId,
+  setAdminLineUserId,
 } from './sessionManager.js';
 import { sanitizeText } from './spellChecker.js';
 
@@ -54,17 +59,24 @@ const HUMAN_REQUEST_KEYWORDS = [
 ];
 
 /**
- * ส่งการแจ้งเตือนไปยัง LINE ของแอดมิน (กรณีตั้งค่า ADMIN_LINE_USER_ID ไว้)
+ * ส่งการแจ้งเตือนไปยัง LINE ของแอดมิน พร้อมปุ่ม/ลิงก์ลัดกดพัก AI 30 นาทีทันที
  */
 async function notifyAdmin(message: string): Promise<void> {
-  if (!config.adminLineUserId) return;
+  const adminId = getAdminLineUserId() || config.adminLineUserId;
+  if (!adminId) return;
   try {
     const client = getLineClient();
+    const quickPauseUrl = `https://koyo-line-bot.onrender.com/pause?key=${encodeURIComponent(config.adminPassword)}&mins=30`;
     await client.pushMessage({
-      to: config.adminLineUserId,
-      messages: [{ type: 'text', text: message }],
+      to: adminId,
+      messages: [
+        {
+          type: 'text',
+          text: `${message}\n\n🛑 กดเพื่อพัก AI 30 นาที (ไม่ต้องพิมพ์รหัส):\n${quickPauseUrl}`,
+        },
+      ],
     });
-    console.log(`🔔 แจ้งเตือนแอดมินสำเร็จ`);
+    console.log(`🔔 แจ้งเตือนแอดมินสำเร็จ (${adminId.slice(-8)})`);
   } catch (err: any) {
     console.warn(`⚠️ แจ้งเตือนแอดมินไม่สำเร็จ: ${err?.message}`);
   }
@@ -333,22 +345,122 @@ export async function handleLineEvent(event: webhook.Event): Promise<void> {
   const lowerText = rawText.toLowerCase();
 
   // ==========================================
-  // 3. คำสั่งสำหรับแอดมิน: สั่งพัก / สั่งเริ่มบอท
+  // 3. คำสั่งสำหรับแอดมิน: สั่งพัก / สั่งเริ่มบอท ผ่านแชท LINE โดยตรง
   // ==========================================
+  const currentAdminId = getAdminLineUserId() || config.adminLineUserId;
+  const hasAdminPassword = config.adminPassword && rawText.includes(config.adminPassword);
+  const isSenderAdmin = (currentAdminId && userId === currentAdminId) || hasAdminPassword;
+
+  if (isSenderAdmin) {
+    // บันทึก userId ของแอดมินอัตโนมัติเมื่อพิมพ์คำสั่งที่มีรหัสผ่าน
+    if (!getAdminLineUserId()) {
+      setAdminLineUserId(userId);
+    }
+
+    // ตัดรหัสผ่านออกจากข้อความคำสั่ง (ถ้ามี)
+    const cleanCmd = (hasAdminPassword ? rawText.replace(config.adminPassword, '') : rawText)
+      .replace(/^#/, '')
+      .trim()
+      .toLowerCase();
+
+    // 3.1 สั่งพัก AI 30 นาที (ทั้งระบบ)
+    if (
+      cleanCmd === 'พัก 30' ||
+      cleanCmd === 'พัก' ||
+      cleanCmd === 'หยุด' ||
+      cleanCmd === 'หยุด 30' ||
+      cleanCmd === 'pause 30' ||
+      cleanCmd === 'pause' ||
+      cleanCmd === 'stop' ||
+      cleanCmd === 'พักครึ่งชั่วโมง' ||
+      cleanCmd === 'พักครึ่งชม' ||
+      cleanCmd === '30'
+    ) {
+      const result = pauseGlobalBot(30 * 60 * 1000);
+      const timeStr = new Date(result.pausedUntil).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+      await sendLineReply(
+        userId,
+        replyToken,
+        `🛑 สั่งพัก AI ทั้งระบบ 30 นาที เรียบร้อยแล้วครับ!\n\nแอดมินสามารถคุยกับลูกค้าได้เลยโดยบอทจะไม่ตอบแทรกครับ\n⏰ ระบบจะเปิดตัวเองอัตโนมัติเวลา ${timeStr} น. (หรือพิมพ์ "เปิด" หากคุยเสร็จก่อนครับ)`
+      );
+      return;
+    }
+
+    // 3.2 สั่งพัก AI 1 ชั่วโมง (ทั้งระบบ)
+    if (cleanCmd === 'พัก 60' || cleanCmd === 'พัก 1 ชม' || cleanCmd === 'พัก 1 ชั่วโมง' || cleanCmd === 'pause 60' || cleanCmd === '60') {
+      const result = pauseGlobalBot(60 * 60 * 1000);
+      const timeStr = new Date(result.pausedUntil).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+      await sendLineReply(
+        userId,
+        replyToken,
+        `⏳ สั่งพัก AI ทั้งระบบ 1 ชั่วโมง เรียบร้อยแล้วครับ!\n\n⏰ ระบบจะเปิดตัวเองอัตโนมัติเวลา ${timeStr} น.`
+      );
+      return;
+    }
+
+    // 3.3 สั่งเปิด AI ทันที (ทั้งระบบ)
+    if (
+      cleanCmd === 'เปิด' ||
+      cleanCmd === 'เริ่ม' ||
+      cleanCmd === 'resume' ||
+      cleanCmd === 'start' ||
+      cleanCmd === 'on'
+    ) {
+      resumeGlobalBot();
+      await sendLineReply(
+        userId,
+        replyToken,
+        '▶️ เปิดการทำงาน AI ทั้งระบบเรียบร้อยแล้วครับ! บอทพร้อมตอบลูกค้าตามปกติต่อเนื่องทันที 🟢'
+      );
+      return;
+    }
+
+    // 3.4 สั่งตรวจสอบสถานะ
+    if (cleanCmd === 'สถานะ' || cleanCmd === 'status') {
+      const status = getGlobalBotStatus();
+      if (status.isEnabled) {
+        await sendLineReply(
+          userId,
+          replyToken,
+          '🟢 สถานะ AI: กำลังทำงานตามปกติ (พร้อมตอบลูกค้าทุกคน)'
+        );
+      } else {
+        const timeStr = status.pausedUntil > 0 ? new Date(status.pausedUntil).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : 'ไม่จำกัดเวลา';
+        await sendLineReply(
+          userId,
+          replyToken,
+          `🔴 สถานะ AI: กำลังพักการทำงาน\n⏳ เหลือเวลาอีกประมาณ ${status.remainingMinutes} นาที (จะเปิดอัตโนมัติเวลา ${timeStr} น.)\n\n💡 พิมพ์ "เปิด" เพื่อเปิดบอททันที`
+        );
+      }
+      return;
+    }
+
+    // 3.5 กรณีพิมพ์รหัสผ่านเพื่อจับคู่แอดมิน
+    if (cleanCmd === '' || cleanCmd === 'admin') {
+      await sendLineReply(
+        userId,
+        replyToken,
+        '🔑 ยืนยันตัวตนแอดมินสำเร็จแล้วครับ! จากนี้คุณสามารถสั่งงานบอทใน LINE นี้ได้เลยครับ:\n\n- พิมพ์ "พัก 30" เพื่อพักบอท 30 นาที\n- พิมพ์ "เปิด" เพื่อเปิดบอททันที\n- พิมพ์ "สถานะ" เพื่อเช็คเวลาที่เหลือ'
+      );
+      return;
+    }
+  }
+
+  // คำสั่งพักเฉพาะห้องแชทนี้ (สำหรับกรณีแอดมินหรือลูกค้าพิมพ์ #พัก ในห้องลูกค้า)
   if (lowerText === '#พัก' || lowerText === '#pause' || lowerText === '#หยุด' || lowerText === '#stop') {
-    pauseUser(userId, 60 * 60 * 1000); // พัก 1 ชั่วโมง
-    console.log(`🛑 แอดมินสั่งพักบอทสำหรับ User: ${userId}`);
+    pauseUser(userId, 30 * 60 * 1000); // พัก 30 นาที
+    console.log(`🛑 สั่งพักบอทสำหรับห้องแชท User: ${userId} (30 นาที)`);
     await sendLineReply(
       userId,
       replyToken,
-      '🛑 พักการทำงานของ AI สำหรับห้องแชทนี้ชั่วคราว 1 ชั่วโมงครับ แอดมินสามารถคุยกับลูกค้าได้เลยครับ (หากต้องการเปิดบอทใหม่ให้พิมพ์ #เริ่ม)'
+      '🛑 พักการทำงานของ AI สำหรับห้องแชทนี้ชั่วคราว 30 นาทีครับ แอดมินสามารถคุยกับลูกค้าได้เลยครับ ระบบจะเปิดตัวเองอัตโนมัติเมื่อครบเวลา (หรือพิมพ์ #เริ่ม เพื่อเปิดทันที)'
     );
     return;
   }
 
   if (lowerText === '#เริ่ม' || lowerText === '#start' || lowerText === '#resume' || lowerText === '#on') {
     unpauseUser(userId);
-    console.log(`▶️ แอดมินสั่งเปิดบอทสำหรับ User: ${userId}`);
+    console.log(`▶️ สั่งเปิดบอทสำหรับ User: ${userId}`);
     await sendLineReply(
       userId,
       replyToken,
@@ -366,12 +478,12 @@ export async function handleLineEvent(event: webhook.Event): Promise<void> {
   }
 
   // ==========================================
-  // 5. ตรวจจับคำขอคุยกับคนจริง (Auto Pause + แจ้งเตือนแอดมิน)
+  // 5. ตรวจจับคำขอคุยกับคนจริง (Auto Pause 30 นาที + แจ้งเตือนแอดมิน)
   // ==========================================
   const isRequestingHuman = HUMAN_REQUEST_KEYWORDS.some((kw) => rawText.includes(kw));
   if (isRequestingHuman) {
-    pauseUser(userId, 60 * 60 * 1000); // พัก 1 ชั่วโมง
-    console.log(`🙋 ลูกค้าขอคุยกับคนจริง -> พักบอทอัตโนมัติสำหรับ User: ${userId}`);
+    pauseUser(userId, 30 * 60 * 1000); // พัก 30 นาที
+    console.log(`🙋 ลูกค้าขอคุยกับคนจริง -> พักบอทอัตโนมัติ 30 นาทีสำหรับ User: ${userId}`);
 
     // แจ้งเตือนแอดมินทันที
     await notifyAdmin(
@@ -379,7 +491,7 @@ export async function handleLineEvent(event: webhook.Event): Promise<void> {
       `User ID: ...${userId.slice(-8)}\n` +
       `ข้อความ: "${rawText}"\n` +
       `เวลา: ${new Date().toLocaleString('th-TH')}\n` +
-      `⚠️ AI หยุดตอบแล้ว รอแอดมินเข้าดูแลด้วยครับ`
+      `⚠️ AI พักการตอบห้องนี้ 30 นาทีแล้ว รอแอดมินเข้าดูแลครับ`
     );
 
     await sendLineReply(

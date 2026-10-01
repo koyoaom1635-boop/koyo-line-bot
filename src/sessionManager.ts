@@ -19,7 +19,7 @@ export interface UserSession {
 const sessions = new Map<string, UserSession>();
 
 const MAX_HISTORY = 10;
-const DEFAULT_PAUSE_DURATION = 60 * 60 * 1000; // 1 ชั่วโมง
+const DEFAULT_PAUSE_DURATION = 30 * 60 * 1000; // ค่าเริ่มต้นพัก 30 นาที
 const DEBOUNCE_WAIT_MS = 3500; // รอ 3.5 วินาทีเพื่อรวมข้อความรัวๆ
 
 // Rate Limiting: จำกัดสูงสุด 10 ข้อความ ต่อ 1 นาที ต่อผู้ใช้
@@ -31,20 +31,88 @@ const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 30 * 60 * 1000; // cleanup ทุก 30 นาที
 
 let isGlobalEnabled = true;
+let globalPausedUntil = 0; // timestamp ที่จะสิ้นสุดการพักบอททั้งระบบ
+let dynamicAdminLineUserId = ''; // จำ userId ของแอดมินจากการส่งคำสั่งยืนยันตัวตนใน LINE
 
 /**
- * ตรวจสอบว่าระบบบอทเปิดทำงานอยู่หรือไม่ (Master Switch)
+ * ดึง LINE User ID ของแอดมิน (จาก Dynamic หรือ Environment Variable)
  */
-export function isGlobalBotEnabled(): boolean {
-  return isGlobalEnabled;
+export function getAdminLineUserId(): string {
+  return dynamicAdminLineUserId;
 }
 
 /**
- * สั่งเปิดหรือปิดการทำงานของบอททั้งระบบ
+ * บันทึก LINE User ID ของแอดมินที่ล็อกอินผ่านแชท
  */
-export function setGlobalBotEnabled(enabled: boolean): void {
-  isGlobalEnabled = enabled;
-  console.log(`🌐 เปลี่ยนสถานะบอททั้งระบบเป็น: ${enabled ? 'เปิดใช้งาน (ON)' : 'พักการทำงาน (OFF)'}`);
+export function setAdminLineUserId(userId: string): void {
+  dynamicAdminLineUserId = userId;
+  console.log(`🔑 ผูกบัญชีแอดมินสำเร็จกับ LINE User ID: ${userId.slice(-8)}`);
+}
+
+/**
+ * ตรวจสอบว่าระบบบอทเปิดทำงานอยู่หรือไม่ (พร้อมระบบนับถอยหลังเปิดอัตโนมัติ)
+ */
+export function isGlobalBotEnabled(): boolean {
+  if (!isGlobalEnabled) {
+    // กรณีตั้งเวลาพักไว้ หากเลยเวลาแล้ว ให้เปิดอัตโนมัติ
+    if (globalPausedUntil > 0 && Date.now() >= globalPausedUntil) {
+      isGlobalEnabled = true;
+      globalPausedUntil = 0;
+      console.log('⏰ ครบกำหนดเวลาพัก AI (30 นาที) แล้ว -> ระบบเปิดทำงานอัตโนมัติตามปกติ');
+      return true;
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
+ * สั่งพักบอททั้งระบบตามระยะเวลาที่กำหนด (ค่าเริ่มต้น 30 นาที)
+ */
+export function pauseGlobalBot(durationMs: number = DEFAULT_PAUSE_DURATION): { pausedUntil: number; minutes: number } {
+  isGlobalEnabled = false;
+  globalPausedUntil = durationMs > 0 ? Date.now() + durationMs : 0;
+  const minutes = Math.round(durationMs / 60000);
+  console.log(`🛑 พักการทำงานบอททั้งระบบเป็นเวลา ${minutes > 0 ? `${minutes} นาที` : 'ไม่มีกำหนด'} (จนถึง ${globalPausedUntil ? new Date(globalPausedUntil).toLocaleTimeString('th-TH') : 'แอดมินสั่งเปิด'})`);
+  return { pausedUntil: globalPausedUntil, minutes };
+}
+
+/**
+ * สั่งเปิดบอททั้งระบบให้กลับมาทำงานทันที
+ */
+export function resumeGlobalBot(): void {
+  isGlobalEnabled = true;
+  globalPausedUntil = 0;
+  console.log('▶️ เปิดการทำงานของบอท AI ทั้งระบบเรียบร้อย');
+}
+
+/**
+ * สั่งเปิดหรือปิดการทำงานของบอททั้งระบบ (รองรับความเข้ากันได้ย้อนหลัง)
+ */
+export function setGlobalBotEnabled(enabled: boolean, durationMs: number = DEFAULT_PAUSE_DURATION): void {
+  if (enabled) {
+    resumeGlobalBot();
+  } else {
+    pauseGlobalBot(durationMs);
+  }
+}
+
+/**
+ * ดึงสถานะปัจจุบันของบอททั้งระบบ
+ */
+export function getGlobalBotStatus(): {
+  isEnabled: boolean;
+  pausedUntil: number;
+  remainingMinutes: number;
+} {
+  const enabled = isGlobalBotEnabled();
+  const remainingMs = Math.max(0, globalPausedUntil - Date.now());
+  const remainingMinutes = Math.ceil(remainingMs / 60000);
+  return {
+    isEnabled: enabled,
+    pausedUntil: globalPausedUntil,
+    remainingMinutes: enabled ? 0 : remainingMinutes,
+  };
 }
 
 function getOrCreateSession(userId: string): UserSession {

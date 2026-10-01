@@ -14,13 +14,40 @@ export interface UserSession {
     messageTimestamps: number[];
 }
 /**
- * ตรวจสอบว่าระบบบอทเปิดทำงานอยู่หรือไม่ (Master Switch)
+ * ดึง LINE User ID ของแอดมิน (จาก Dynamic หรือ Environment Variable)
+ */
+export declare function getAdminLineUserId(): string;
+/**
+ * บันทึก LINE User ID ของแอดมินที่ล็อกอินผ่านแชท
+ */
+export declare function setAdminLineUserId(userId: string): void;
+/**
+ * ตรวจสอบว่าระบบบอทเปิดทำงานอยู่หรือไม่ (พร้อมระบบนับถอยหลังเปิดอัตโนมัติ)
  */
 export declare function isGlobalBotEnabled(): boolean;
 /**
- * สั่งเปิดหรือปิดการทำงานของบอททั้งระบบ
+ * สั่งพักบอททั้งระบบตามระยะเวลาที่กำหนด (ค่าเริ่มต้น 30 นาที)
  */
-export declare function setGlobalBotEnabled(enabled: boolean): void;
+export declare function pauseGlobalBot(durationMs?: number): {
+    pausedUntil: number;
+    minutes: number;
+};
+/**
+ * สั่งเปิดบอททั้งระบบให้กลับมาทำงานทันที
+ */
+export declare function resumeGlobalBot(): void;
+/**
+ * สั่งเปิดหรือปิดการทำงานของบอททั้งระบบ (รองรับความเข้ากันได้ย้อนหลัง)
+ */
+export declare function setGlobalBotEnabled(enabled: boolean, durationMs?: number): void;
+/**
+ * ดึงสถานะปัจจุบันของบอททั้งระบบ
+ */
+export declare function getGlobalBotStatus(): {
+    isEnabled: boolean;
+    pausedUntil: number;
+    remainingMinutes: number;
+};
 /**
  * ตรวจสอบว่าห้องแชทของลูกค้ารายนี้กำลังอยู่ในโหมด "พักบอท" หรือไม่
  */
