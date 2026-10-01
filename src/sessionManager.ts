@@ -18,7 +18,7 @@ export interface UserSession {
 
 const sessions = new Map<string, UserSession>();
 
-const MAX_HISTORY = 10;
+const MAX_HISTORY = 16;
 const DEFAULT_PAUSE_DURATION = 30 * 60 * 1000; // ค่าเริ่มต้นพัก 30 นาที
 const DEBOUNCE_WAIT_MS = 3500; // รอ 3.5 วินาทีเพื่อรวมข้อความรัวๆ
 

@@ -1,5 +1,5 @@
 const sessions = new Map();
-const MAX_HISTORY = 10;
+const MAX_HISTORY = 16;
 const DEFAULT_PAUSE_DURATION = 30 * 60 * 1000; // ค่าเริ่มต้นพัก 30 นาที
 const DEBOUNCE_WAIT_MS = 3500; // รอ 3.5 วินาทีเพื่อรวมข้อความรัวๆ
 // Rate Limiting: จำกัดสูงสุด 10 ข้อความ ต่อ 1 นาที ต่อผู้ใช้

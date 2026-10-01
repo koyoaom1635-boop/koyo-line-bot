@@ -37,6 +37,17 @@ ${KOYO_STORE_KNOWLEDGE}
    - ลูกค้าอาจพิมพ์คำตก สระหลุด หรือพิมพ์ผิด เช่น "พืนไม้", "ไมเทียม", "ระแนงไม้", "กระเบือง", "โลเคชัน", "อยุ่ไหน", "ส้งฟรี" ให้เข้าใจเจตนาลูกค้าทันที
    - หากลูกค้าพิมพ์ผิดหรือคลุมเครือจนจับใจความยาก ให้ตอบอย่างเข้าใจและเดาใจลูกค้าเบื้องต้น พร้อมเสนอตัวเลือกช่วยเหลือ เช่น "ลูกค้าต้องการสอบถามเรื่องพื้นไม้เทียมภายนอก หรือระแนงบังตาครับ?"
 
+[ข้อกำหนดสำคัญอย่างยิ่ง: การดูบริบทแชทและไม่ตอบคำถามเดิมซ้ำ (Context Awareness & Anti-Repetition)]:
+1. 'ต้องดูประวัติการคุยย้อนหลังทุกครั้ง': อ่านบทสนทนาก่อนหน้าอย่างละเอียดก่อนตอบเสมอ จดจำสิ่งที่เคยคุยกัน เช่น รุ่นสินค้าที่สนใจ ขนาดพื้นที่ที่ลูกค้าเคยบอก หรือข้อมูลที่เคยแจ้งไปแล้ว
+2. 'ห้ามตอบคำตอบเดิมซ้ำ หรือส่งข้อมูลเดิมซ้ำเด็ดขาด':
+   - หากเคยส่งแผนที่ พิกัดโชว์รูม/โรงงาน หรือเบอร์โทรศัพท์ให้ลูกค้าไปแล้วในแชทนี้ 'ห้ามส่งซ้ำอีกเป็นอันขาด' เว้นแต่ลูกค้าจะพิมพ์ขอแผนที่หรือเบอร์ติดต่ออีกครั้ง
+   - หากเคยแจ้งราคาสินค้ารุ่นนั้นไปแล้ว ไม่ต้องก๊อปปี้ราคาเดิมมาแจงซ้ำ ให้คุยต่อยอดทันที เช่น สอบถามขนาดพื้นที่ หรือแนะนำขั้นตอนต่อไป
+3. 'กรณีลูกค้าตอบรับสั้นๆ' (เช่น "โอเค", "โอเคครับ", "ขอบคุณครับ", "รับทราบ", "ครับ", "ค่ะ", "ได้ครับ", "ดีครับ"):
+   - ห้ามส่งรายการสินค้า แผนที่ หรือข้อความขายของซ้ำเด็ดขาด
+   - ให้ตอบรับสั้นๆ สุภาพ 1 ประโยค เช่น "ยินดีให้บริการครับผม หากต้องการให้คำนวณพื้นที่หรือสอบถามข้อมูลส่วนไหนเพิ่มเติม แจ้งได้ตลอดเลยนะครับ 😊"
+4. 'กรณีลูกค้าถามเรื่องเดิมซ้ำ':
+   - แสดงว่าลูกค้ายังไม่เข้าใจคำตอบก่อนหน้า ให้เปลี่ยนสำนวน อธิบายให้เข้าใจง่ายและกระชับขึ้น เจาะจงเฉพาะจุดที่ลูกค้าสงสัย ห้ามก๊อปปี้ข้อความเดิมมาตอบซ้ำเด็ดขาด
+
 [ข้อกำหนดการตอบและจัดรูปแบบข้อความ]:
 1. 'อ่านง่าย สบายตา ไม่เป็นก้อนทึบ': แบ่งวรรคและขึ้นบรรทัดใหม่ให้ชัดเจน
 2. 'ใช้ Emoji นำสายตาจัดเป็นหัวข้อ': 
@@ -68,18 +79,29 @@ export async function askGemini(userMessage, history = []) {
     const ai = getAIClient();
     const modelsToTry = [config.geminiModel, ...FALLBACK_MODELS.filter((m) => m !== config.geminiModel)];
     const systemInstruction = buildSystemInstruction();
-    // สร้าง Context บทสนทนาย้อนหลังเพื่อให้ AI ตอบได้ต่อเนื่อง
+    // สร้าง Context บทสนทนาย้อนหลังเพื่อให้ AI ตอบได้ต่อเนื่องและป้องกันบทบาทซ้ำซ้อน
     const contents = [];
     for (const h of history) {
+        const role = h.role === 'model' ? 'model' : 'user';
+        if (contents.length > 0 && contents[contents.length - 1].role === role) {
+            contents[contents.length - 1].parts[0].text += '\n' + h.parts;
+        }
+        else {
+            contents.push({
+                role: role,
+                parts: [{ text: h.parts }],
+            });
+        }
+    }
+    if (contents.length > 0 && contents[contents.length - 1].role === 'user') {
+        contents[contents.length - 1].parts[0].text += '\n' + userMessage;
+    }
+    else {
         contents.push({
-            role: h.role === 'model' ? 'model' : 'user',
-            parts: [{ text: h.parts }],
+            role: 'user',
+            parts: [{ text: userMessage }],
         });
     }
-    contents.push({
-        role: 'user',
-        parts: [{ text: userMessage }],
-    });
     let lastError = null;
     for (const model of modelsToTry) {
         try {
@@ -141,10 +163,16 @@ export async function askGeminiWithImage(imageBase64, mimeType, captionText, his
     // สร้าง context ประวัติการคุย (text only) + รูปปัจจุบัน
     const contents = [];
     for (const h of history) {
-        contents.push({
-            role: h.role === 'model' ? 'model' : 'user',
-            parts: [{ text: h.parts }],
-        });
+        const role = h.role === 'model' ? 'model' : 'user';
+        if (contents.length > 0 && contents[contents.length - 1].role === role) {
+            contents[contents.length - 1].parts[0].text += '\n' + h.parts;
+        }
+        else {
+            contents.push({
+                role: role,
+                parts: [{ text: h.parts }],
+            });
+        }
     }
     contents.push({
         role: 'user',
