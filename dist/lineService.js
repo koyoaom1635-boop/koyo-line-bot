@@ -145,51 +145,82 @@ async function sendLineReply(userId, replyToken, text) {
         }
     }
 }
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /**
- * ส่งข้อความต่อเนื่องแบบมีจังหวะหน่วงเวลา (Sequential with delay) เพื่อให้อ่านง่ายและเป็นธรรมชาติ
+ * แสดงสถานะ "กำลังพิมพ์..." (Loading Animation) ในห้องแชท LINE
+ * - ใช้ได้เฉพาะแชท 1:1 เท่านั้น / loadingSeconds ต้องเป็นทวีคูณของ 5 (5-60 วินาที)
+ * - แอนิเมชันจะหายเองทันทีเมื่อบอทส่งข้อความถึงลูกค้า
  */
-async function sendSequentialLineReply(userId, replyToken, chunks, delayMs = 1200) {
+async function showTyping(userId, loadingSeconds = 20) {
+    if (!userId || userId === 'unknown_user')
+        return;
+    const secs = Math.min(60, Math.max(5, Math.round(loadingSeconds / 5) * 5));
+    try {
+        await getLineClient().showLoadingAnimation({ chatId: userId, loadingSeconds: secs });
+    }
+    catch (err) {
+        console.warn(`⚠️ แสดงสถานะกำลังพิมพ์ไม่สำเร็จ: ${err?.message}`);
+    }
+}
+/**
+ * คำนวณเวลาที่คนจริงใช้พิมพ์ข้อความนี้ในมือถือ (ตามความยาวข้อความ + สุ่มเล็กน้อยให้ไม่เป๊ะเหมือนเครื่อง)
+ * จำกัดเพดานไว้ไม่ให้ลูกค้ารอนานเกินไป
+ */
+function typingDelayMs(text) {
+    const base = 700 + text.length * 35;
+    const jitter = Math.random() * 700;
+    return Math.min(Math.max(base + jitter, 1200), 5000);
+}
+/**
+ * ส่งข้อความต่อเนื่องแบบเลียนแบบจังหวะการพิมพ์ของคน (Human-like typing)
+ * - บับเบิ้ลแรก: รอให้ครบเวลาพิมพ์ (หักเวลาที่ AI ใช้คิดไปแล้ว) แล้วส่งผ่าน replyMessage
+ * - บับเบิ้ลถัดไป: แสดง "กำลังพิมพ์..." แล้วหน่วงตามความยาวข้อความ ก่อนส่งผ่าน pushMessage
+ * - ถ้าไม่มี replyToken (เช่น หลังวิเคราะห์รูป) จะส่งผ่าน pushMessage ทั้งหมด
+ */
+async function sendSequentialLineReply(userId, replyToken, chunks, startedAt = Date.now()) {
     if (!chunks || chunks.length === 0)
         return;
     const cleanChunks = chunks.map((c) => sanitizeText(c)).filter((c) => c.length > 0);
     if (cleanChunks.length === 0)
         return;
     const client = getLineClient();
-    // กรณีมีบับเบิ้ลเดียว ส่งตามปกติทันที
-    if (cleanChunks.length === 1) {
-        await sendLineReply(userId, replyToken, cleanChunks[0]);
-        return;
-    }
-    // ส่งบับเบิ้ลแรกผ่าน replyMessage
-    try {
-        await client.replyMessage({
-            replyToken: replyToken,
-            messages: [{ type: 'text', text: cleanChunks[0] }],
-        });
-    }
-    catch (err) {
-        console.warn('⚠️ replyMessage บับเบิ้ลแรกไม่สำเร็จ กำลังส่งผ่าน pushMessage แทน...');
-        try {
-            await client.pushMessage({
-                to: userId,
-                messages: [{ type: 'text', text: cleanChunks[0] }],
-            });
+    for (let i = 0; i < cleanChunks.length; i++) {
+        const text = cleanChunks[i];
+        if (i === 0) {
+            // เวลาที่ AI ใช้ประมวลผลถือเป็นส่วนหนึ่งของเวลาพิมพ์แล้ว รอเฉพาะส่วนที่เหลือ
+            const remaining = typingDelayMs(text) - (Date.now() - startedAt);
+            if (remaining > 0)
+                await sleep(remaining);
         }
-        catch (pushErr) {
-            console.error('❌ pushMessage บับเบิ้ลแรกไม่สำเร็จ:', pushErr?.message || pushErr);
+        else {
+            // เว้นจังหวะสั้นๆ เหมือนคนกดส่งแล้วพิมพ์ต่อ
+            await sleep(400 + Math.random() * 400);
+            await showTyping(userId, 10);
+            await sleep(typingDelayMs(text));
         }
-    }
-    // หน่วงเวลาและส่งบับเบิ้ลถัดไปผ่าน pushMessage
-    for (let i = 1; i < cleanChunks.length; i++) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        try {
-            await client.pushMessage({
-                to: userId,
-                messages: [{ type: 'text', text: cleanChunks[i] }],
-            });
+        let sent = false;
+        if (i === 0 && replyToken) {
+            try {
+                await client.replyMessage({
+                    replyToken: replyToken,
+                    messages: [{ type: 'text', text }],
+                });
+                sent = true;
+            }
+            catch (err) {
+                console.warn('⚠️ replyMessage ไม่สำเร็จ กำลังส่งผ่าน pushMessage แทน...');
+            }
         }
-        catch (pushErr) {
-            console.error(`❌ pushMessage บับเบิ้ลที่ ${i + 1} ไม่สำเร็จ:`, pushErr?.message || pushErr);
+        if (!sent) {
+            try {
+                await client.pushMessage({
+                    to: userId,
+                    messages: [{ type: 'text', text }],
+                });
+            }
+            catch (pushErr) {
+                console.error(`❌ pushMessage บับเบิ้ลที่ ${i + 1} ไม่สำเร็จ:`, pushErr?.message || pushErr);
+            }
         }
     }
 }
@@ -260,21 +291,16 @@ export async function handleLineEvent(event) {
             });
             return;
         }
+        const visionStartedAt = Date.now();
+        await showTyping(userId, 30); // แสดง "กำลังพิมพ์..." ระหว่าง AI วิเคราะห์รูป
         const history = getChatHistory(userId);
         const visionCaption = 'ลูกค้าส่งรูปหน้างานมา กรุณาวิเคราะห์รูปและแนะนำสินค้าของ KOYO DECOR ที่เหมาะสม พร้อมถามขนาดพื้นที่เพื่อประเมินงบประมาณเบื้องต้น';
         const aiResponse = await askGeminiWithImage(imageData.base64, imageData.mimeType, visionCaption, history);
         appendChatHistory(userId, 'user', '[ลูกค้าส่งรูปภาพหน้างานมา]');
         appendChatHistory(userId, 'model', aiResponse);
         const chunks = splitAiResponse(aiResponse);
-        await new Promise((r) => setTimeout(r, 800)); // รอก่อนส่งคำตอบ Vision
-        for (let i = 0; i < chunks.length; i++) {
-            if (i > 0)
-                await new Promise((r) => setTimeout(r, 1200));
-            await client.pushMessage({
-                to: userId,
-                messages: [{ type: 'text', text: sanitizeText(chunks[i]) }],
-            });
-        }
+        // replyToken ถูกใช้ไปแล้วกับข้อความ "ได้รับรูปแล้ว" จึงส่งผ่าน push ทั้งหมด
+        await sendSequentialLineReply(userId, null, chunks, visionStartedAt);
         return;
     }
     // กรณีไม่ใช่ข้อความตัวอักษร และไม่ใช่รูปภาพ (sticker, video, audio ฯลฯ)
@@ -395,6 +421,9 @@ export async function handleLineEvent(event) {
     console.log(`📩 ได้รับข้อความจาก [${userId.slice(-6)}]: "${rawText}" (เข้าคิวบัฟเฟอร์)`);
     bufferMessage(userId, rawText, replyToken, async (combinedText, latestToken) => {
         try {
+            const startedAt = Date.now();
+            // แสดง "กำลังพิมพ์..." ระหว่าง AI คิดคำตอบ (แสดงหลังบัฟเฟอร์ เหมือนแอดมินอ่านจบแล้วค่อยพิมพ์)
+            await showTyping(userId, 20);
             console.log(`🚀 กำลังประมวลผลข้อความรวม: "${combinedText}"`);
             const history = getChatHistory(userId);
             const aiResponse = await askGemini(combinedText, history);
@@ -404,9 +433,9 @@ export async function handleLineEvent(event) {
             appendChatHistory(userId, 'model', aiResponse);
             // แยกข้อความเป็นบับเบิ้ล (ถ้ามีตัวคั่น ---SPLIT--- หรือท่อนแยก)
             const chunks = splitAiResponse(aiResponse);
-            console.log(`💬 ส่งข้อความทั้งหมด ${chunks.length} บับเบิ้ล (หน่วงเวลา 1.2 วินาทีระหว่างข้อความ)`);
-            // ส่งคำตอบต่อเนื่องแบบมีจังหวะหน่วงเวลาให้อ่านง่าย
-            await sendSequentialLineReply(userId, latestToken, chunks, 1200);
+            console.log(`💬 ส่งข้อความทั้งหมด ${chunks.length} บับเบิ้ล (หน่วงเวลาตามจังหวะพิมพ์ของคน)`);
+            // ส่งคำตอบต่อเนื่องแบบเลียนแบบจังหวะการพิมพ์ของคน
+            await sendSequentialLineReply(userId, latestToken, chunks, startedAt);
         }
         catch (err) {
             console.error('❌ ข้อผิดพลาดในการตอบกลับ:', err?.message || err);
