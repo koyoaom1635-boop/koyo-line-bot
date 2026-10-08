@@ -1,7 +1,7 @@
 import { messagingApi } from '@line/bot-sdk';
 import { config } from './config.js';
 import { askGemini, askGeminiWithImage } from './geminiService.js';
-import { isGlobalBotEnabled, isUserPaused, isRateLimited, pauseUser, unpauseUser, getChatHistory, appendChatHistory, bufferMessage, pauseGlobalBot, resumeGlobalBot, getGlobalBotStatus, getAdminLineUserId, setAdminLineUserId, } from './sessionManager.js';
+import { isGlobalBotEnabled, isUserPaused, isRateLimited, pauseUser, unpauseUser, getChatHistory, appendChatHistory, bufferMessage, pauseGlobalBot, resumeGlobalBot, getGlobalBotStatus, getAdminLineUserId, setAdminLineUserId, extendUserPauseIfActive, getShortCode, findUserIdByShortCode, markCustomerMessage, } from './sessionManager.js';
 import { sanitizeText } from './spellChecker.js';
 const { MessagingApiClient } = messagingApi;
 let clientInstance = null;
@@ -40,23 +40,31 @@ const HUMAN_REQUEST_KEYWORDS = [
     'รีบด่วน',
 ];
 /**
- * ส่งการแจ้งเตือนไปยัง LINE ของแอดมิน พร้อมปุ่ม/ลิงก์ลัดกดพัก AI 30 นาทีทันที
+ * ส่งการแจ้งเตือนไปยัง LINE ของแอดมิน พร้อมลิงก์ลัดกดพัก AI
+ * - ถ้าระบุ customerUserId จะแนบรหัสห้อง + ลิงก์ "หยุดบอทเฉพาะห้องนี้" ด้วย
  */
-async function notifyAdmin(message) {
+async function notifyAdmin(message, customerUserId) {
     const adminId = getAdminLineUserId() || config.adminLineUserId;
     if (!adminId)
         return;
     try {
         const client = getLineClient();
-        const quickPauseUrl = `https://koyo-line-bot.onrender.com/pause?key=${encodeURIComponent(config.adminPassword)}&mins=30`;
+        const baseUrl = 'https://koyo-line-bot.onrender.com';
+        const key = encodeURIComponent(config.adminPassword);
+        const quickPauseUrl = `${baseUrl}/pause?key=${key}&mins=30`;
+        let text = message;
+        if (customerUserId && customerUserId !== 'unknown_user') {
+            const code = getShortCode(customerUserId);
+            const roomPauseUrl = `${quickPauseUrl}&userId=${encodeURIComponent(customerUserId)}`;
+            text +=
+                `\n\n🔖 รหัสห้อง: ${code}` +
+                    `\n🤫 หยุดบอทเฉพาะห้องนี้ 30 นาที (กดก่อนตอบลูกค้า):\n${roomPauseUrl}` +
+                    `\n(หรือพิมพ์ "พัก ${code}" ในแชทนี้)`;
+        }
+        text += `\n\n🛑 พัก AI ทั้งระบบ 30 นาที:\n${quickPauseUrl}`;
         await client.pushMessage({
             to: adminId,
-            messages: [
-                {
-                    type: 'text',
-                    text: `${message}\n\n🛑 กดเพื่อพัก AI 30 นาที (ไม่ต้องพิมพ์รหัส):\n${quickPauseUrl}`,
-                },
-            ],
+            messages: [{ type: 'text', text }],
         });
         console.log(`🔔 แจ้งเตือนแอดมินสำเร็จ (${adminId.slice(-8)})`);
     }
@@ -228,11 +236,6 @@ async function sendSequentialLineReply(userId, replyToken, chunks, startedAt = D
  * ฟังก์ชันจัดการ Webhook Event ที่ได้รับจาก LINE Platform
  */
 export async function handleLineEvent(event) {
-    // ถ้าปิดบอททั้งระบบอยู่ ไม่ต้องตอบข้อความใดๆ ทั้งสิ้น (แอดมินตอบเอง)
-    if (!isGlobalBotEnabled()) {
-        console.log('🛑 บอทอยู่ในโหมดพักการทำงานทั้งระบบ -> ไม่ตอบแทรก');
-        return;
-    }
     const client = getLineClient();
     const userId = event.source?.userId || 'unknown_user';
     // =========================================
@@ -241,8 +244,9 @@ export async function handleLineEvent(event) {
     if (event.type === 'follow') {
         console.log(`👤 ผู้ใช้ใหม่ Follow: ${userId}`);
         // แจ้งแอดมินมีลูกค้าใหม่
-        await notifyAdmin(`👤 มีลูกค้าใหม่ Add LINE ร้าน!\nUser ID: ${userId.slice(-8)}\nเวลา: ${new Date().toLocaleString('th-TH')}`);
-        if ('replyToken' in event && event.replyToken) {
+        await notifyAdmin(`👤 มีลูกค้าใหม่ Add LINE ร้าน!\nUser ID: ${userId.slice(-8)}\nเวลา: ${new Date().toLocaleString('th-TH')}`, userId);
+        // ถ้าปิดบอททั้งระบบอยู่ ไม่ต้องส่งข้อความต้อนรับ (แอดมินตอบเอง)
+        if (isGlobalBotEnabled() && 'replyToken' in event && event.replyToken) {
             await client.replyMessage({
                 replyToken: event.replyToken,
                 messages: [
@@ -262,6 +266,35 @@ export async function handleLineEvent(event) {
     const message = event.message;
     const replyToken = event.replyToken;
     if (!replyToken) {
+        return;
+    }
+    // =========================================
+    // 0. ตรวจว่าเป็นลูกค้าหรือแอดมิน + กันบอทตอบแทรกตอนแอดมินคุยอยู่
+    // =========================================
+    const knownAdminId = getAdminLineUserId() || config.adminLineUserId;
+    const isKnownAdmin = !!knownAdminId && userId === knownAdminId;
+    const hasPasswordInText = message.type === 'text' && !!config.adminPassword && message.text.includes(config.adminPassword);
+    if (!isKnownAdmin && !hasPasswordInText) {
+        const isNewConversation = markCustomerMessage(userId);
+        // ถ้าห้องนี้พักบอทอยู่ (แอดมินกำลังคุย) -> ลูกค้าพิมพ์มาเมื่อไหร่ นับเวลาพัก 30 นาทีใหม่ทุกครั้ง
+        // บอทจะกลับมาตอบเองก็ต่อเมื่อห้องนี้เงียบครบ 30 นาทีแล้วเท่านั้น
+        const roomPaused = extendUserPauseIfActive(userId);
+        // ลูกค้าเริ่มคุยรอบใหม่ -> แจ้งแอดมินพร้อมลิงก์ "หยุดบอทเฉพาะห้องนี้"
+        const previewText = message.type === 'text' ? message.text : message.type === 'image' ? '[รูปภาพ]' : `[${message.type}]`;
+        const isHumanRequest = message.type === 'text' && HUMAN_REQUEST_KEYWORDS.some((kw) => message.text.includes(kw));
+        if (isNewConversation && !roomPaused && !isHumanRequest) {
+            void notifyAdmin(`💬 ลูกค้าเริ่มแชทเข้ามา\nข้อความ: "${previewText.slice(0, 100)}"\nเวลา: ${new Date().toLocaleString('th-TH')}`, userId);
+        }
+        if (!isGlobalBotEnabled()) {
+            console.log('🛑 บอทอยู่ในโหมดพักการทำงานทั้งระบบ -> ไม่ตอบแทรก');
+            return;
+        }
+        if (roomPaused) {
+            console.log(`🤫 ห้องแชท ${userId.slice(-6)} อยู่ในโหมดพักบอท -> ต่อเวลาพัก 30 นาทีใหม่ และไม่ตอบแทรก`);
+            return;
+        }
+    }
+    else if (message.type !== 'text' && !isGlobalBotEnabled()) {
         return;
     }
     // =========================================
@@ -328,6 +361,26 @@ export async function handleLineEvent(event) {
             .replace(/^#/, '')
             .trim()
             .toLowerCase();
+        // 3.0 สั่งพัก / เปิด บอท "เฉพาะห้องลูกค้า" ด้วยรหัสห้อง 6 ตัว เช่น "พัก A1B2C3" / "เปิด A1B2C3"
+        const roomCmd = cleanCmd.match(/^(พัก|หยุด|pause|stop|เปิด|เริ่ม|resume|start|on)\s*([0-9a-z]{6})$/i);
+        if (roomCmd) {
+            const isPauseCmd = ['พัก', 'หยุด', 'pause', 'stop'].includes(roomCmd[1]);
+            const code = roomCmd[2].toUpperCase();
+            const targetUserId = findUserIdByShortCode(code);
+            if (!targetUserId) {
+                await sendLineReply(userId, replyToken, `❓ ไม่พบห้องแชทรหัส ${code} ครับ (ลูกค้าต้องเคยทักเข้ามาก่อน)`);
+                return;
+            }
+            if (isPauseCmd) {
+                pauseUser(targetUserId, 30 * 60 * 1000);
+                await sendLineReply(userId, replyToken, `🤫 หยุดบอทห้อง ${code} แล้วครับ แอดมินคุยกับลูกค้าได้เลย\n⏰ ลูกค้าพิมพ์มาเมื่อไหร่ ระบบนับ 30 นาทีใหม่ให้เอง บอทจะกลับมาตอบเมื่อห้องนี้เงียบครบ 30 นาที\n💡 พิมพ์ "เปิด ${code}" เพื่อเปิดบอทห้องนี้ทันที`);
+            }
+            else {
+                unpauseUser(targetUserId);
+                await sendLineReply(userId, replyToken, `▶️ เปิดบอทห้อง ${code} แล้วครับ AI กลับมาตอบลูกค้าห้องนี้ตามปกติ`);
+            }
+            return;
+        }
         // 3.1 สั่งพัก AI 30 นาที (ทั้งระบบ)
         if (cleanCmd === 'พัก 30' ||
             cleanCmd === 'พัก' ||
@@ -375,9 +428,13 @@ export async function handleLineEvent(event) {
         }
         // 3.5 กรณีพิมพ์รหัสผ่านเพื่อจับคู่แอดมิน
         if (cleanCmd === '' || cleanCmd === 'admin') {
-            await sendLineReply(userId, replyToken, '🔑 ยืนยันตัวตนแอดมินสำเร็จแล้วครับ! จากนี้คุณสามารถสั่งงานบอทใน LINE นี้ได้เลยครับ:\n\n- พิมพ์ "พัก 30" เพื่อพักบอท 30 นาที\n- พิมพ์ "เปิด" เพื่อเปิดบอททันที\n- พิมพ์ "สถานะ" เพื่อเช็คเวลาที่เหลือ');
+            await sendLineReply(userId, replyToken, '🔑 ยืนยันตัวตนแอดมินสำเร็จแล้วครับ! จากนี้คุณสามารถสั่งงานบอทใน LINE นี้ได้เลยครับ:\n\n- พิมพ์ "พัก 30" เพื่อพักบอททั้งระบบ 30 นาที\n- พิมพ์ "เปิด" เพื่อเปิดบอททันที\n- พิมพ์ "พัก รหัสห้อง" (เช่น พัก A1B2C3) เพื่อหยุดบอทเฉพาะห้องลูกค้า\n- พิมพ์ "เปิด รหัสห้อง" เพื่อเปิดบอทห้องนั้น\n- พิมพ์ "สถานะ" เพื่อเช็คเวลาที่เหลือ\n\n💡 รหัสห้องจะแนบมาในข้อความแจ้งเตือนทุกครั้งที่ลูกค้าทักเข้ามา');
             return;
         }
+    }
+    // ข้อความที่ไม่ใช่คำสั่งแอดมิน -> ถ้าพักบอททั้งระบบอยู่ ไม่ต้องตอบ
+    if (!isGlobalBotEnabled()) {
+        return;
     }
     // คำสั่งพักเฉพาะห้องแชทนี้ (สำหรับกรณีแอดมินหรือลูกค้าพิมพ์ #พัก ในห้องลูกค้า)
     if (lowerText === '#พัก' || lowerText === '#pause' || lowerText === '#หยุด' || lowerText === '#stop') {
@@ -411,7 +468,7 @@ export async function handleLineEvent(event) {
             `User ID: ...${userId.slice(-8)}\n` +
             `ข้อความ: "${rawText}"\n` +
             `เวลา: ${new Date().toLocaleString('th-TH')}\n` +
-            `⚠️ AI พักการตอบห้องนี้ 30 นาทีแล้ว รอแอดมินเข้าดูแลครับ`);
+            `⚠️ AI พักการตอบห้องนี้ 30 นาทีแล้ว รอแอดมินเข้าดูแลครับ`, userId);
         await sendLineReply(userId, replyToken, 'รอแอดมินสักครู่นะครับ 🙏');
         return;
     }
@@ -428,6 +485,11 @@ export async function handleLineEvent(event) {
             const history = getChatHistory(userId);
             const aiResponse = await askGemini(combinedText, history);
             console.log(`🤖 AI ตอบกลับ: "${aiResponse.slice(0, 70)}..."`);
+            // ระหว่างที่ AI กำลังคิด แอดมินอาจกดหยุดบอทแล้ว -> ไม่ส่งคำตอบแทรก
+            if (isUserPaused(userId) || !isGlobalBotEnabled()) {
+                console.log(`🤫 แอดมินหยุดบอทระหว่าง AI กำลังคิด -> ยกเลิกการส่งคำตอบห้อง ${userId.slice(-6)}`);
+                return;
+            }
             // บันทึกประวัติการคุย
             appendChatHistory(userId, 'user', combinedText);
             appendChatHistory(userId, 'model', aiResponse);

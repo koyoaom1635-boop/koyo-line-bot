@@ -95,6 +95,7 @@ function getOrCreateSession(userId) {
             history: [],
             lastActive: Date.now(),
             messageTimestamps: [],
+            lastCustomerMessageAt: 0,
         };
         sessions.set(userId, session);
     }
@@ -141,6 +142,52 @@ export function unpauseUser(userId) {
     const session = getOrCreateSession(userId);
     session.isPaused = false;
     session.pausedUntil = 0;
+}
+/**
+ * ถ้าห้องนี้กำลังพักบอทอยู่ ให้ต่อเวลาพักออกไปใหม่ (นับใหม่จากตอนนี้)
+ * ใช้ตอนลูกค้าพิมพ์เข้ามาระหว่างที่แอดมินคุยอยู่ เพื่อไม่ให้บอทกลับมาตอบแทรกกลางบทสนทนา
+ * คืนค่า true หากห้องนี้กำลังพักอยู่
+ */
+export function extendUserPauseIfActive(userId, durationMs = DEFAULT_PAUSE_DURATION) {
+    if (!isUserPaused(userId))
+        return false;
+    const session = getOrCreateSession(userId);
+    session.pausedUntil = Date.now() + durationMs;
+    return true;
+}
+/**
+ * ดึงเวลาที่ห้องนี้จะเลิกพักบอท (0 = ไม่ได้พัก)
+ */
+export function getUserPausedUntil(userId) {
+    return isUserPaused(userId) ? sessions.get(userId).pausedUntil : 0;
+}
+/**
+ * รหัสสั้นของลูกค้า (6 ตัวท้ายของ userId) ใช้อ้างอิงห้องแชทในคำสั่งแอดมิน
+ */
+export function getShortCode(userId) {
+    return userId.slice(-6).toUpperCase();
+}
+/**
+ * ค้นหา userId จากรหัสสั้น 6 ตัว (เฉพาะลูกค้าที่มี session อยู่ในระบบ)
+ */
+export function findUserIdByShortCode(code) {
+    const target = code.trim().toUpperCase();
+    for (const userId of sessions.keys()) {
+        if (getShortCode(userId) === target)
+            return userId;
+    }
+    return null;
+}
+/**
+ * บันทึกว่าลูกค้าส่งข้อความเข้ามา และคืนค่า true หากเป็นการเริ่มคุยรอบใหม่
+ * (ไม่เคยคุย หรือเงียบไปนานเกิน 30 นาที)
+ */
+export function markCustomerMessage(userId) {
+    const session = getOrCreateSession(userId);
+    const now = Date.now();
+    const isNew = now - session.lastCustomerMessageAt > DEFAULT_PAUSE_DURATION;
+    session.lastCustomerMessageAt = now;
+    return isNew;
 }
 /**
  * ดึงประวัติการคุยล่าสุด

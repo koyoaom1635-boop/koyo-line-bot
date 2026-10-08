@@ -12,6 +12,7 @@ export interface UserSession {
     history: ChatMessage[];
     lastActive: number;
     messageTimestamps: number[];
+    lastCustomerMessageAt: number;
 }
 /**
  * ดึง LINE User ID ของแอดมิน (จาก Dynamic หรือ Environment Variable)
@@ -60,6 +61,29 @@ export declare function pauseUser(userId: string, durationMs?: number): void;
  * สั่งยกเลิกการพักบอท เพื่อให้ AI กลับมาตอบแชทตามปกติ
  */
 export declare function unpauseUser(userId: string): void;
+/**
+ * ถ้าห้องนี้กำลังพักบอทอยู่ ให้ต่อเวลาพักออกไปใหม่ (นับใหม่จากตอนนี้)
+ * ใช้ตอนลูกค้าพิมพ์เข้ามาระหว่างที่แอดมินคุยอยู่ เพื่อไม่ให้บอทกลับมาตอบแทรกกลางบทสนทนา
+ * คืนค่า true หากห้องนี้กำลังพักอยู่
+ */
+export declare function extendUserPauseIfActive(userId: string, durationMs?: number): boolean;
+/**
+ * ดึงเวลาที่ห้องนี้จะเลิกพักบอท (0 = ไม่ได้พัก)
+ */
+export declare function getUserPausedUntil(userId: string): number;
+/**
+ * รหัสสั้นของลูกค้า (6 ตัวท้ายของ userId) ใช้อ้างอิงห้องแชทในคำสั่งแอดมิน
+ */
+export declare function getShortCode(userId: string): string;
+/**
+ * ค้นหา userId จากรหัสสั้น 6 ตัว (เฉพาะลูกค้าที่มี session อยู่ในระบบ)
+ */
+export declare function findUserIdByShortCode(code: string): string | null;
+/**
+ * บันทึกว่าลูกค้าส่งข้อความเข้ามา และคืนค่า true หากเป็นการเริ่มคุยรอบใหม่
+ * (ไม่เคยคุย หรือเงียบไปนานเกิน 30 นาที)
+ */
+export declare function markCustomerMessage(userId: string): boolean;
 /**
  * ดึงประวัติการคุยล่าสุด
  */

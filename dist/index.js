@@ -2,7 +2,7 @@ import express from 'express';
 import { validateSignature } from '@line/bot-sdk';
 import { config, validateConfig } from './config.js';
 import { handleLineEvent } from './lineService.js';
-import { isGlobalBotEnabled, pauseGlobalBot, resumeGlobalBot, getGlobalBotStatus, pauseUser, } from './sessionManager.js';
+import { isGlobalBotEnabled, pauseGlobalBot, resumeGlobalBot, getGlobalBotStatus, pauseUser, unpauseUser, getUserPausedUntil, getShortCode, } from './sessionManager.js';
 const app = express();
 // ตรวจสอบความถูกต้องของ Configuration
 validateConfig();
@@ -246,10 +246,12 @@ app.get('/pause', (req, res) => {
     else {
         pauseGlobalBot(mins * 60 * 1000);
     }
-    const status = getGlobalBotStatus();
-    const endTimeStr = status.pausedUntil > 0 ? new Date(status.pausedUntil).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : 'ไม่กำหนด';
-    const resumeUrl = `/resume?key=${encodeURIComponent(config.adminPassword)}`;
-    const resetUrl = `/pause?key=${encodeURIComponent(config.adminPassword)}&mins=${mins}${targetUserId ? `&userId=${encodeURIComponent(targetUserId)}` : ''}`;
+    const pausedUntil = targetUserId ? getUserPausedUntil(targetUserId) : getGlobalBotStatus().pausedUntil;
+    const endTimeStr = pausedUntil > 0 ? new Date(pausedUntil).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : 'ไม่กำหนด';
+    const userParam = targetUserId ? `&userId=${encodeURIComponent(targetUserId)}` : '';
+    const resumeUrl = `/resume?key=${encodeURIComponent(config.adminPassword)}${userParam}`;
+    const resetUrl = `/pause?key=${encodeURIComponent(config.adminPassword)}&mins=${mins}${userParam}`;
+    const scopeLabel = targetUserId ? `เฉพาะห้อง ${getShortCode(targetUserId)}` : 'ทั้งระบบ';
     res.send(`
     <!DOCTYPE html>
     <html lang="th">
@@ -274,7 +276,7 @@ app.get('/pause', (req, res) => {
     </head>
     <body>
       <div class="card">
-        <h1>🔄 รีเซ็ตเวลาพัก AI เรียบร้อย!</h1>
+        <h1>🔄 พัก AI (${scopeLabel}) เรียบร้อย!</h1>
         <p>AI หยุดตอบอัตโนมัติแล้ว แอดมินคุยกับลูกค้าได้เลยครับ</p>
         <div class="timer-box" id="countdown">30:00</div>
         <div class="timer-sub">⏳ จะเปิดทำงานอัตโนมัติเวลา: <b>${endTimeStr} น.</b></div>
@@ -288,7 +290,7 @@ app.get('/pause', (req, res) => {
       </div>
 
       <script>
-        const targetTime = ${status.pausedUntil};
+        const targetTime = ${pausedUntil};
         function updateTimer() {
           const now = Date.now();
           const diff = Math.max(0, targetTime - now);
@@ -315,8 +317,14 @@ app.get('/resume', (req, res) => {
         res.status(403).send('❌ รหัสความปลอดภัย (key) ไม่ถูกต้องครับ');
         return;
     }
-    resumeGlobalBot();
-    const pauseUrl = `/pause?key=${encodeURIComponent(config.adminPassword)}&mins=30`;
+    const targetUserId = req.query.userId;
+    if (targetUserId) {
+        unpauseUser(targetUserId);
+    }
+    else {
+        resumeGlobalBot();
+    }
+    const pauseUrl = `/pause?key=${encodeURIComponent(config.adminPassword)}&mins=30${targetUserId ? `&userId=${encodeURIComponent(targetUserId)}` : ''}`;
     res.send(`
     <!DOCTYPE html>
     <html lang="th">
